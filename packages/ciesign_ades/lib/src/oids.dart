@@ -6,6 +6,7 @@ class Oids {
   static const sha256 = '2.16.840.1.101.3.4.2.1';
   static const sha384 = '2.16.840.1.101.3.4.2.2';
   static const sha512 = '2.16.840.1.101.3.4.2.3';
+  static const sha1 = '1.3.14.3.2.26';
   static const rsaEncryption = '1.2.840.113549.1.1.1';
   static const sha256WithRsa = '1.2.840.113549.1.1.11';
 
@@ -15,6 +16,7 @@ class Oids {
   static const signingCertificateV2 = '1.2.840.113549.1.9.16.2.47';
   static const signingCertificate = '1.2.840.113549.1.9.16.2.12';
   static const signatureTimeStampToken = '1.2.840.113549.1.9.16.2.14';
+  static const tstInfo = '1.2.840.113549.1.9.16.1.4';
 
   static const commonName = '2.5.4.3';
   static const surname = '2.5.4.4';

@@ -6,6 +6,7 @@ import 'cms.dart';
 import 'pdf/pdf_document.dart';
 import 'pdf/pdf_objects.dart';
 import 'trust.dart';
+import 'timestamp.dart';
 import 'x509.dart';
 
 /// Esito della verifica di una firma: integrità crittografica e catena fino
@@ -21,6 +22,8 @@ class SignatureReport {
     this.coversWholeDocument,
     this.subFilter,
     this.chain,
+    this.timestamp,
+    this.isDocumentTimestamp = false,
   });
 
   /// Catena del firmatario verso le CA della CIE; nullo senza certificato.
@@ -36,7 +39,54 @@ class SignatureReport {
   final bool? coversWholeDocument;
   final String? subFilter;
 
+  /// Marca temporale: della firma, oppure la marca stessa quando
+  /// [isDocumentTimestamp] è vero. Nulla se assente o illeggibile.
+  final TimestampInfo? timestamp;
+
+  /// Vero per una DocTimeStamp PAdES: non è una firma di una persona ma una
+  /// marca temporale sull'intero documento.
+  final bool isDocumentTimestamp;
+
   bool get isIntact => integrity == SignatureIntegrity.valid;
+
+  /// Validità del certificato del firmatario rispetto a oggi, come fanno
+  /// i verificatori (EU DSS, Aruba Sign, Dike): la data dichiarata nella firma
+  /// la sceglie chi firma e non prova nulla; solo una marca temporale integra
+  /// dimostra che la firma esisteva prima della scadenza del certificato.
+  CertificateTime get certificateTime => certificateTimeAt(DateTime.now());
+
+  CertificateTime certificateTimeAt(DateTime now) {
+    final c = certificate;
+    if (c == null) return CertificateTime.unknown;
+    final st = signingTime;
+    if (now.isBefore(c.notBefore) || (!isDocumentTimestamp && st != null && st.isBefore(c.notBefore))) {
+      return CertificateTime.notYetValid;
+    }
+    if (!now.isAfter(c.notAfter)) return CertificateTime.valid;
+    final t = timestamp;
+    final poe = !isDocumentTimestamp && t != null && t.isValid ? t.genTime : null;
+    if (poe != null && !poe.isBefore(c.notBefore) && !poe.isAfter(c.notAfter)) return CertificateTime.validAtTimestamp;
+    return CertificateTime.expired;
+  }
+}
+
+/// Validità temporale del certificato del firmatario.
+enum CertificateTime {
+  /// Certificato valido oggi.
+  valid,
+
+  /// Certificato scaduto oggi, ma una marca temporale integra prova che la
+  /// firma è stata apposta mentre era valido.
+  validAtTimestamp,
+
+  /// Certificato scaduto e nessuna prova che la firma sia anteriore alla scadenza.
+  expired,
+
+  /// Certificato non ancora valido oggi o alla data dichiarata della firma.
+  notYetValid,
+
+  /// Certificato assente nella firma.
+  unknown,
 }
 
 /// Verifica e sbustamento di un file CAdES (.p7m).
@@ -57,6 +107,7 @@ class CadesFile {
           signingTime: s.signingTime,
           hasTimestamp: s.hasSignatureTimestamp,
           chain: _chain(s.certificate, cms.certificates, s.signingTime),
+          timestamp: _signatureTimestamp(s),
         ),
     ];
     return CadesFile._(cms, reports);
@@ -77,6 +128,17 @@ class CadesFile {
       n = n.substring(0, n.length - 4);
     }
     return n == name ? '$name.estratto' : n;
+  }
+}
+
+/// Marca temporale di firma: copre il valore della firma (RFC 3161, CAdES-T).
+TimestampInfo? _signatureTimestamp(CmsSignerInfo s) {
+  final token = s.signatureTimestampToken;
+  if (token == null) return null;
+  try {
+    return TimestampInfo.parse(token, s.signature);
+  } on Object {
+    return null;
   }
 }
 
@@ -124,17 +186,38 @@ class PadesVerifier {
     }
     final digest = Uint8List.fromList(sha256.convert(b.toBytes()).bytes);
     final covers = br.length == 4 && br[0] == 0 && br[2] + br[3] == pdf.length;
-    final cms = CmsSignedData.parse(_trimZeros(contents));
+    final token = _trimZeros(contents);
+    if (sub == 'ETSI.RFC3161' || (sig['Type'] as PdfName?)?.value == 'DocTimeStamp') {
+      return _documentTimestamp(token, b.toBytes(), name, covers, sub);
+    }
+    final cms = CmsSignedData.parse(token);
     final s = cms.signers.first;
     return SignatureReport(
       integrity: s.checkIntegrity(digest),
       certificate: s.certificate,
       signingTime: s.signingTime ?? _parsePdfDate(sig['M']),
       hasTimestamp: s.hasSignatureTimestamp,
+      timestamp: _signatureTimestamp(s),
       fieldName: name,
       coversWholeDocument: covers,
       subFilter: sub,
       chain: _chain(s.certificate, cms.certificates, s.signingTime ?? _parsePdfDate(sig['M'])),
+    );
+  }
+
+  /// Una DocTimeStamp contiene un TimeStampToken sui byte del ByteRange.
+  static SignatureReport _documentTimestamp(Uint8List token, Uint8List covered, String name, bool covers, String? sub) {
+    final t = TimestampInfo.parse(token, covered);
+    return SignatureReport(
+      integrity: !t.imprintMatches ? SignatureIntegrity.contentModified : t.integrity,
+      certificate: t.tsaCertificate,
+      signingTime: t.genTime,
+      hasTimestamp: true,
+      fieldName: name,
+      coversWholeDocument: covers,
+      subFilter: sub,
+      timestamp: t,
+      isDocumentTimestamp: true,
     );
   }
 

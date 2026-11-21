@@ -225,6 +225,12 @@ class CmsSignerInfo {
   /// Vero se la firma porta una marca temporale (attributo non firmato).
   bool get hasSignatureTimestamp => _attr(_unsigned, Oids.signatureTimeStampToken) != null;
 
+  /// TimeStampToken della marca temporale di firma, se presente.
+  Uint8List? get signatureTimestampToken {
+    final t = _attr(_unsigned, Oids.signatureTimeStampToken);
+    return t == null ? null : Uint8List.fromList(t.raw);
+  }
+
   /// Controlla che l'impronta del contenuto coincida e che la firma sia
   /// stata prodotta dalla chiave del certificato. Non controlla la catena né
   /// la revoca del certificato.
