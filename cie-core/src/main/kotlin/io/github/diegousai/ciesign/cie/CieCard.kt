@@ -31,6 +31,7 @@ class CieCard internal constructor(
     private var dhPublic = ByteArray(0)
     private var dhIccPublic = ByteArray(0)
     private var caModulus = ByteArray(0)
+    private var caPubExp = ByteArray(0)
     private var caCar = ByteArray(0)
     private var caAid = ByteArray(0)
     private var dappModulus = ByteArray(0)
@@ -131,8 +132,12 @@ class CieCard internal constructor(
     private fun readExtAuthKeyParams() {
         val query = byteArrayOf(0x4D, 0x09, 0x70, 0x07, 0xBF.toByte(), 0xA0.toByte(), 0x04, 0x03, 0x7F, 0x49, 0x80.toByte())
         val resp = expectOk("lettura parametri di autenticazione", sendPlain(GET_DATA, query))
+        // Come nel middleware ufficiale (IAS.cpp), i campi si cercano per tag e non per
+        // posizione: sulle carte reali il modulo non è il primo elemento.
         val key = Tlv.parse(resp.data, reparse = true).child(0).child(0)
-        caModulus = key.child(0).value
+        log("Struttura della chiave della CA: " + key.children.joinToString { Bytes.hex(it.tag) + "(" + it.value.size + ")" })
+        caModulus = Bytes.stripLeadingZeros(key.childWithTag(0x81).value)
+        caPubExp = Bytes.stripLeadingZeros(key.childWithTag(0x82).value)
         val cha = key.childWithTag(0x5F, 0x4C).value
         val chr = key.childWithTag(0x5F, 0x20).value
         caCar = chr.copyOfRange(4, chr.size)
@@ -180,6 +185,11 @@ class CieCard internal constructor(
         val headLen = caModulus.size - shaSize - 2
         val toSignCert = Bytes.concat(byteArrayOf(0x6A), endEntityCert.copyOfRange(0, headLen), Bytes.sha256(endEntityCert), byteArrayOf(0xBC.toByte()))
         val certSignature = Crypto.modPow(toSignCert, caPrivateExponent, caModulus)
+        // Controllo locale, come fa il middleware: se la firma non si verifica con la chiave
+        // pubblica letta dalla carta, è inutile mandarla.
+        if (!Crypto.modPow(certSignature, caPubExp, caModulus).contentEquals(toSignCert)) {
+            throw CieProtocolException("La chiave della CA letta dalla carta non corrisponde a quella attesa (modulo di ${caModulus.size} byte)")
+        }
         val remainder = endEntityCert.copyOfRange(headLen, endEntityCert.size)
         val cvc = Tlv.encode(0x7F21, Bytes.concat(Tlv.encode(0x5F37, certSignature), Tlv.encode(0x5F38, remainder), Tlv.encode(0x42, caCar)))
 

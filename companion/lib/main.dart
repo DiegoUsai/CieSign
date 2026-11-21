@@ -8,6 +8,9 @@ import 'cie_bridge.dart';
 
 void main() => runApp(const CieSignCompanionApp());
 
+/// Identificativo della build, passato dal workflow con --dart-define (vedi android-prototipo.yml).
+const _buildId = String.fromEnvironment('BUILD_ID', defaultValue: 'locale');
+
 class CieSignCompanionApp extends StatelessWidget {
   const CieSignCompanionApp({super.key});
 
@@ -117,7 +120,7 @@ class _PrototypePageState extends State<PrototypePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('CIE Sign · prototipo')),
+      appBar: AppBar(title: const Text('CIE Sign · prototipo $_buildId')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),
