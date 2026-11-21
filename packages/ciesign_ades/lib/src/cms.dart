@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 
 import 'der.dart';
 import 'oids.dart';
+import 'trust.dart';
 import 'x509.dart';
 
 /// Costruzione delle strutture **CMS** (RFC 5652) per CAdES e PAdES di livello
@@ -70,12 +71,18 @@ class CmsBuilder {
       Der.smallInt(1),
       Der.setOf([Der.algorithm(Oids.sha256)]),
       Der.seq([Der.oid(Oids.data), if (content != null) Der.explicit(0, Der.octets(content))]),
-      Der.tlv(DerTag.context(0), certificate.der),
+      _certificates([certificate, ?CieTrust.intermediateFor(certificate)]),
       Der.setOf([signerInfo]),
     ]);
     return Der.seq([Der.oid(Oids.signedData), Der.explicit(0, sd)]);
   }
 }
+
+/// Campo certificates [0] IMPLICIT SET OF: il firmatario e, se è una CIE, la
+/// CA intermedia che lo ha emesso, così gli altri verificatori ricostruiscono
+/// la catena (RFC 5652, 5.1).
+Uint8List _certificates(List<Certificate> certs) =>
+    Uint8List.fromList(Der.setOf([for (final c in certs) c.der]))..[0] = DerTag.context(0);
 
 /// Firma CAdES in due tempi: prima si preparano gli attributi firmati, poi,
 /// ricevuta la firma dalla carta, si compone il file .p7m.

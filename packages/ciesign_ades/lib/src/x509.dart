@@ -47,6 +47,61 @@ class Certificate {
 
   Uint8List get sha256Fingerprint => Uint8List.fromList(sha256.convert(der).bytes);
 
+  /// Parte firmata dall'emittente (TBSCertificate) e firma dell'emittente.
+  Uint8List get tbsDer => Uint8List.fromList(_tbs.raw);
+  String get signatureAlgorithm => _root[1][0].asOid;
+  Uint8List get signatureValue => Uint8List.sublistView(_root[2].content, 1);
+
+  /// Estensioni X.509 per OID, con il valore già estratto dall'OCTET STRING.
+  Map<String, DerNode> get _extensions {
+    final out = <String, DerNode>{};
+    for (final n in _tbs.children) {
+      if (n.tag != DerTag.context(3)) continue;
+      for (final ext in n[0].children) {
+        final value = ext[ext.length - 1];
+        out[ext[0].asOid] = DerNode.parse(Uint8List.fromList(value.content));
+      }
+    }
+    return out;
+  }
+
+  /// Vero se l'estensione KeyUsage consente digitalSignature; vero anche se
+  /// l'estensione manca, perché allora l'uso non è limitato.
+  bool get allowsDigitalSignature {
+    final ku = _extensions[Oids.keyUsage];
+    if (ku == null) return true;
+    final bits = ku.content;
+    return bits.length > 1 && (bits[1] & 0x80) != 0;
+  }
+
+  /// Vero se BasicConstraints dichiara il certificato come CA.
+  bool get isCa {
+    final bc = _extensions[Oids.basicConstraints];
+    if (bc == null || bc.length == 0) return false;
+    final first = bc[0];
+    return first.tag == DerTag.boolean && first.content.isNotEmpty && first.content[0] != 0;
+  }
+
+  /// Vero se [issuer] ha emesso questo certificato: il nome dell'emittente
+  /// coincide e la firma sha256WithRSAEncryption è valida.
+  bool isIssuedBy(Certificate issuer) {
+    if (!_bytesEqual(issuerDer, issuer.subjectDer)) return false;
+    if (signatureAlgorithm != Oids.sha256WithRsa) return false;
+    try {
+      return issuer.rsaPublicKey.verifySha256(sha256.convert(tbsDer).bytes, signatureValue);
+    } on UnsupportedError {
+      return false;
+    }
+  }
+
+  bool isValidAt(DateTime t) => !t.isBefore(notBefore) && !t.isAfter(notAfter);
+
+  @override
+  bool operator ==(Object other) => other is Certificate && _bytesEqual(der, other.der);
+
+  @override
+  int get hashCode => Object.hashAll(sha256Fingerprint.take(8));
+
   /// Nome leggibile del titolare: nome e cognome se presenti, altrimenti il CN.
   String get holderName {
     final s = subject;
@@ -54,6 +109,14 @@ class Certificate {
     if (gn != null && sn != null) return '$gn $sn';
     return s.get(Oids.commonName) ?? s.toString();
   }
+}
+
+bool _bytesEqual(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 class DistinguishedName {
