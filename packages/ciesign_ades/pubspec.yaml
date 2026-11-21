@@ -1,0 +1,14 @@
+name: ciesign_ades
+description: Motore di firma AdES di CIE Sign in Dart puro (PAdES e CAdES di livello B-B, sbustamento, verifica di base).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  crypto: ^3.0.8
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^6.0.0
