@@ -117,11 +117,12 @@ class SimulatedCie(
                 Tlv.encode(0x70, encodeTag3(0xBFA101, Tlv.encode(0xA3, Tlv.encode(tag, value))))
             }
             query[4] == 0xBF.toByte() && query[5] == 0xA0.toByte() -> {
+                // Ordine diverso da quello "ovvio": il modulo non è il primo elemento.
                 val key = Bytes.concat(
-                    Tlv.encode(0x81, Bytes.toFixedLength(caPublic.modulus, 256)),
-                    Tlv.encode(0x82, Bytes.stripLeadingZeros(caPublic.publicExponent.toByteArray())),
                     Tlv.encode(0x5F20, chr),
                     Tlv.encode(0x5F4C, cha),
+                    Tlv.encode(0x81, Bytes.toFixedLength(caPublic.modulus, 256)),
+                    Tlv.encode(0x82, Bytes.stripLeadingZeros(caPublic.publicExponent.toByteArray())),
                 )
                 Tlv.encode(0x70, encodeTag3(0xBFA004, Tlv.encode(0x7F49, key)))
             }
