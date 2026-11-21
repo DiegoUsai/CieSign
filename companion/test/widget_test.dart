@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 
+import 'package:cie_sign_companion/cie_bridge.dart';
 import 'package:cie_sign_companion/main.dart';
 
 void main() {
@@ -15,7 +16,7 @@ void main() {
   });
 
   testWidgets('il pulsante si abilita solo con un PIN di 8 cifre', (tester) async {
-    await tester.pumpWidget(const CieSignCompanionApp());
+    await tester.pumpWidget(CieSignCompanionApp(home: PrototypePage(bridge: CieBridge())));
     await tester.pumpAndSettle();
 
     FilledButton button() => tester.widget<FilledButton>(find.byType(FilledButton));
@@ -31,7 +32,7 @@ void main() {
   });
 
   testWidgets('mostra l\'impronta SHA-256 del testo di prova', (tester) async {
-    await tester.pumpWidget(const CieSignCompanionApp());
+    await tester.pumpWidget(CieSignCompanionApp(home: PrototypePage(bridge: CieBridge())));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(1), 'abc');
     await tester.pump();

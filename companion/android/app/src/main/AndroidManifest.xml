@@ -2,6 +2,9 @@
     <!-- Lettura della CIE via NFC: il telefono fa da lettore contactless. -->
     <uses-permission android:name="android.permission.NFC" />
     <uses-feature android:name="android.hardware.nfc" android:required="true" />
+    <!-- Collegamento cifrato con il PC sulla Wi-Fi di casa. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <application
         android:label="CIE Sign"
         android:name="${applicationName}"
@@ -26,6 +29,14 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- QR code di abbinamento mostrato dal PC (ciesign://pair?...), anche se
+                 inquadrato con la fotocamera del telefono invece che dall'app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="ciesign" android:host="pair"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

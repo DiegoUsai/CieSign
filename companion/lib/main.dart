@@ -1,42 +1,285 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:ciesign_link/ciesign_link.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'cie_bridge.dart';
+import 'link_service.dart';
+import 'pair_page.dart';
+import 'request_page.dart';
 
 void main() => runApp(const CieSignCompanionApp());
 
 /// Identificativo della build, passato dal workflow con --dart-define (vedi android-prototipo.yml).
 const _buildId = String.fromEnvironment('BUILD_ID', defaultValue: 'locale');
 
+ThemeData _theme(Brightness b) =>
+    ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0066CC), brightness: b));
+
 class CieSignCompanionApp extends StatelessWidget {
-  const CieSignCompanionApp({super.key});
+  const CieSignCompanionApp({super.key, this.home});
+
+  /// Pagina iniziale alternativa, usata nei test.
+  final Widget? home;
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'CIE Sign',
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0066CC))),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0066CC), brightness: Brightness.dark),
+      theme: _theme(Brightness.light),
+      darkTheme: _theme(Brightness.dark),
+      home: home ?? const HomePage(),
+    );
+  }
+}
+
+/// Schermata principale: stato del collegamento con il PC e richieste in arrivo.
+class HomePage extends StatefulWidget {
+  const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+  final _bridge = CieBridge();
+  PhoneLink? _link;
+  String? _openError;
+  StreamSubscription<LinkMessage>? _requests;
+  Timer? _retry;
+  bool _requestOpen = false;
+  bool _foreground = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _bridge.onLink = _onLink;
+    _open();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _retry?.cancel();
+    _requests?.cancel();
+    _link?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _open() async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final link = await PhoneLink.open(dir, deviceName: await _bridge.deviceName());
+      link.addListener(() {
+        if (mounted) setState(() {});
+      });
+      _requests = link.requests.listen(_onRequest);
+      setState(() => _link = link);
+      link.connect();
+      // Finché l'app è in primo piano, prova a ricollegarsi al PC ogni 10 secondi.
+      _retry = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (_foreground && link.state == LinkState.disconnected) link.connect();
+      });
+      final initial = await _bridge.initialLink();
+      if (initial != null) _onLink(initial);
+    } on Object catch (e) {
+      setState(() => _openError = '$e');
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground) _link?.connect();
+  }
+
+  /// QR code inquadrato con la fotocamera del telefono invece che dall'app.
+  void _onLink(String uri) {
+    try {
+      _pair(PairingOffer.parse(uri));
+    } on FormatException catch (e) {
+      _snack('QR code non valido: ${e.message}');
+    }
+  }
+
+  Future<void> _scan() async {
+    final offer = await Navigator.of(context).push<PairingOffer>(MaterialPageRoute(builder: (_) => const ScanPage()));
+    if (offer != null) await _pair(offer);
+  }
+
+  Future<void> _pair(PairingOffer offer) async {
+    final link = _link;
+    if (link == null) return;
+    final ok = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => PairPage(link: link, offer: offer)),
+    );
+    if (ok == true) _snack('PC abbinato: ${link.pc?.device.name}');
+    if (ok == false) _snack('Abbinamento annullato');
+  }
+
+  Future<void> _onRequest(LinkMessage m) async {
+    final link = _link!;
+    if (m is Cancel) return; // gestito dalla pagina della richiesta
+    if (m is CertificateRequest && link.certificate != null) {
+      await link.send(CertificateResponse(link.certificate!));
+      _snack('Certificato della CIE inviato al PC');
+      return;
+    }
+    if (_requestOpen) {
+      if (m is SignRequest) {
+        await link.send(SignError(m.id, 'BUSY', 'Il telefono sta già gestendo un\'altra richiesta'));
+      }
+      return;
+    }
+    _requestOpen = true;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RequestPage(
+          link: link,
+          bridge: _bridge,
+          request: m,
+          cancels: link.requests.where((r) => r is Cancel).cast<Cancel>(),
+        ),
       ),
-      home: const PrototypePage(),
+    );
+    _requestOpen = false;
+    if (mounted) setState(() {});
+  }
+
+  void _snack(String text) {
+    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final link = _link;
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('CIE Sign · prototipo $_buildId'),
+        actions: [
+          if (link?.pc != null)
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'pair') _scan();
+                if (v == 'forget') link!.unpair();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'pair', child: Text('Abbina un altro PC')),
+                PopupMenuItem(value: 'forget', child: Text('Dimentica il PC')),
+              ],
+            ),
+        ],
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            if (_openError != null)
+              Card(
+                color: theme.colorScheme.errorContainer,
+                child: Padding(padding: const EdgeInsets.all(12), child: Text(_openError!)),
+              )
+            else if (link == null)
+              const Center(child: CircularProgressIndicator())
+            else
+              _linkCard(link, theme),
+            const SizedBox(height: 16),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.badge),
+                title: const Text('Prova la carta'),
+                subtitle: Text(
+                  link?.certificate != null
+                      ? 'Certificato della CIE registrato sul telefono'
+                      : 'Legge il certificato e lo registra per le firme dal PC',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PrototypePage(bridge: _bridge, onCertificate: link?.rememberCertificate),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _linkCard(PhoneLink link, ThemeData theme) {
+    final pcName = link.pc?.device.name;
+    final (IconData icon, Color? color, String title, String text) = switch (link.state) {
+      LinkState.notPaired => (
+        Icons.qr_code_scanner,
+        null,
+        'Nessun PC abbinato',
+        'Sul PC apri CIE Sign, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto '
+            'oppure con la fotocamera del telefono. Telefono e PC devono essere sulla stessa Wi-Fi.',
+      ),
+      LinkState.connected => (
+        Icons.link,
+        Colors.green,
+        'Collegato a $pcName',
+        'In attesa di richieste dal PC. Tieni aperta l\'app durante la firma.',
+      ),
+      LinkState.connecting => (Icons.sync, null, 'Collegamento a $pcName…', ''),
+      LinkState.disconnected => (
+        Icons.link_off,
+        theme.colorScheme.error,
+        '$pcName non raggiungibile',
+        'Controlla che CIE Sign sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
+      ),
+    };
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              Icon(icon, color: color),
+              const SizedBox(width: 8),
+              Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
+            ]),
+            if (text.isNotEmpty) ...[const SizedBox(height: 8), Text(text)],
+            if (link.state == LinkState.disconnected && link.lastError != null) ...[
+              const SizedBox(height: 8),
+              Text(link.lastError!, style: theme.textTheme.bodySmall),
+            ],
+            const SizedBox(height: 12),
+            if (link.state == LinkState.notPaired)
+              FilledButton.icon(onPressed: _scan, icon: const Icon(Icons.qr_code_scanner), label: const Text('Abbina PC')),
+            if (link.state == LinkState.disconnected)
+              FilledButton.icon(onPressed: link.connect, icon: const Icon(Icons.refresh), label: const Text('Ricollega')),
+          ],
+        ),
+      ),
     );
   }
 }
 
 /// Schermata del prototipo: legge il certificato dalla CIE e firma un'impronta di prova.
 class PrototypePage extends StatefulWidget {
-  const PrototypePage({super.key});
+  const PrototypePage({super.key, required this.bridge, this.onCertificate});
+
+  final CieBridge bridge;
+
+  /// Riceve il certificato letto, che il telefono ricorda per le firme dal PC.
+  final void Function(Uint8List)? onCertificate;
 
   @override
   State<PrototypePage> createState() => _PrototypePageState();
 }
 
 class _PrototypePageState extends State<PrototypePage> {
-  late final CieBridge _bridge = CieBridge(onStatus: (s) => setState(() => _status = s));
+  CieBridge get _bridge => widget.bridge;
   final _pin = TextEditingController();
   final _text = TextEditingController(text: 'Prova di firma con CIE Sign');
 
@@ -50,11 +293,15 @@ class _PrototypePageState extends State<PrototypePage> {
   @override
   void initState() {
     super.initState();
+    _bridge.onStatus = (s) {
+      if (mounted) setState(() => _status = s);
+    };
     _checkNfc();
   }
 
   @override
   void dispose() {
+    _bridge.onStatus = null;
     _pin.dispose();
     _text.dispose();
     super.dispose();
@@ -62,6 +309,7 @@ class _PrototypePageState extends State<PrototypePage> {
 
   Future<void> _checkNfc() async {
     final s = await _bridge.nfcStatus();
+    if (!mounted) return;
     setState(() {
       _nfcWarning = !s.available
           ? 'Questo telefono non ha l\'NFC: non può leggere la CIE.'
@@ -87,15 +335,18 @@ class _PrototypePageState extends State<PrototypePage> {
     try {
       final r = await _bridge.start(pin: _pin.text, digest: _sign ? _digest : null);
       setState(() => _result = r);
+      widget.onCertificate?.call(r.certificate);
     } on CieError catch (e) {
       setState(() => _error = e);
       // Dopo un PIN errato lo si cancella, così un secondo tentativo è sempre voluto.
       if (e.code == 'WRONG_PIN' || e.code == 'PIN_BLOCKED') _pin.clear();
     } finally {
-      setState(() {
-        _busy = false;
-        _status = null;
-      });
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _status = null;
+        });
+      }
     }
   }
 
@@ -120,7 +371,7 @@ class _PrototypePageState extends State<PrototypePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('CIE Sign · prototipo $_buildId')),
+      appBar: AppBar(title: const Text('Prova la carta')),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(16),

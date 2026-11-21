@@ -1,8 +1,11 @@
 package io.github.diegousai.cie_sign_companion
 
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.nfc.NfcAdapter
 import android.nfc.Tag
 import android.nfc.tech.IsoDep
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -24,12 +27,15 @@ import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
- * Attività principale. Espone a Flutter il canale "ciesign/cie" con due metodi:
+ * Attività principale. Espone a Flutter il canale "ciesign/cie" con questi metodi:
  * - nfcStatus: indica se l'NFC è presente e attivo;
  * - start: attende la CIE, verifica il PIN, legge il certificato e, se richiesto,
  *   firma l'impronta SHA-256 ricevuta;
- * - cancel: interrompe l'attesa della carta.
- * Durante l'operazione invia a Flutter il metodo "status" con lo stato corrente.
+ * - cancel: interrompe l'attesa della carta;
+ * - initialLink: collegamento ciesign://pair?... con cui l'app è stata aperta;
+ * - deviceName: produttore e modello del telefono, mostrati sul PC.
+ * Durante l'operazione invia a Flutter il metodo "status" con lo stato corrente,
+ * e il metodo "link" quando un QR code di abbinamento apre l'app già avviata.
  */
 class MainActivity : FlutterActivity() {
 
@@ -37,6 +43,7 @@ class MainActivity : FlutterActivity() {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private var pending: PendingRequest? = null
+    private var initialLink: String? = null
 
     private class PendingRequest(val pin: CharArray, val digest: ByteArray?, val result: MethodChannel.Result) {
         /** Diventa vero alla prima carta rilevata, per ignorare rilevamenti successivi. */
@@ -49,6 +56,35 @@ class MainActivity : FlutterActivity() {
         channel.setMethodCallHandler(::onMethodCall)
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        initialLink = pairingLink(intent)
+        requestLocalNetworkPermission()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        pairingLink(intent)?.let { channel.invokeMethod("link", it) }
+    }
+
+    /** Collegamento ciesign://pair?... aperto, per esempio, dalla fotocamera del telefono. */
+    private fun pairingLink(intent: Intent?): String? {
+        val data = intent?.data ?: return null
+        return if (intent.action == Intent.ACTION_VIEW && data.scheme == "ciesign" && data.host == "pair") data.toString() else null
+    }
+
+    /**
+     * Dalle versioni più recenti di Android l'accesso ai dispositivi della rete locale
+     * richiede un permesso a runtime. Sulle versioni che non lo prevedono la richiesta
+     * è ignorata.
+     */
+    private fun requestLocalNetworkPermission() {
+        if (Build.VERSION.SDK_INT < 36) return
+        if (checkSelfPermission(LOCAL_NETWORK) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(LOCAL_NETWORK), 1)
+        }
+    }
+
     private fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "nfcStatus" -> {
@@ -56,6 +92,15 @@ class MainActivity : FlutterActivity() {
                 result.success(mapOf("available" to (adapter != null), "enabled" to (adapter?.isEnabled == true)))
             }
             "start" -> start(call, result)
+            "initialLink" -> {
+                result.success(initialLink)
+                initialLink = null
+            }
+            "deviceName" -> {
+                val maker = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
+                val model = Build.MODEL
+                result.success(if (model.startsWith(maker, ignoreCase = true)) model else "$maker $model")
+            }
             "cancel" -> {
                 stopReader()
                 pending?.let { it.pin.fill('0'); it.result.error("CANCELLED", "Operazione annullata", null) }
@@ -186,6 +231,10 @@ class MainActivity : FlutterActivity() {
             pending?.let { it.pin.fill('0'); it.result.error("CANCELLED", "App in secondo piano, operazione annullata", null) }
             pending = null
         }
+    }
+
+    private companion object {
+        const val LOCAL_NETWORK = "android.permission.ACCESS_LOCAL_NETWORK"
     }
 
     override fun onDestroy() {

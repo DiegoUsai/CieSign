@@ -45,14 +45,43 @@ class CieError implements Exception {
 
 /// Ponte verso il modulo nativo che parla con la CIE.
 class CieBridge {
-  CieBridge({required this.onStatus}) {
+  CieBridge({this.onStatus, this.onLink}) {
     _channel.setMethodCallHandler((call) async {
-      if (call.method == 'status') onStatus(call.arguments as String);
+      switch (call.method) {
+        case 'status':
+          onStatus?.call(call.arguments as String);
+        case 'link':
+          onLink?.call(call.arguments as String);
+      }
     });
   }
 
   static const _channel = MethodChannel('ciesign/cie');
-  final void Function(String) onStatus;
+
+  /// Stato dell'operazione con la carta, da mostrare all'utente.
+  void Function(String)? onStatus;
+
+  /// Collegamento `ciesign://pair?...` aperto mentre l'app è già avviata,
+  /// per esempio inquadrando il QR code con la fotocamera del telefono.
+  void Function(String)? onLink;
+
+  /// Collegamento con cui l'app è stata avviata, se c'è; lo si legge una volta.
+  Future<String?> initialLink() async {
+    try {
+      return await _channel.invokeMethod<String>('initialLink');
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Nome del telefono (produttore e modello), mostrato sul PC.
+  Future<String> deviceName() async {
+    try {
+      return await _channel.invokeMethod<String>('deviceName') ?? 'Smartphone';
+    } on MissingPluginException {
+      return 'Smartphone';
+    }
+  }
 
   Future<({bool available, bool enabled})> nfcStatus() async {
     final m = await _channel.invokeMapMethod<String, bool>('nfcStatus') ?? {};
