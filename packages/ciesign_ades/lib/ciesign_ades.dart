@@ -14,5 +14,6 @@ export 'src/oids.dart';
 export 'src/pdf/pades.dart' show PadesPreparation, SignatureAppearanceText, VisibleSignature;
 export 'src/pdf/pdf_document.dart' show PdfDocument, PdfFormatException, PdfRect;
 export 'src/trust.dart';
+export 'src/timestamp.dart';
 export 'src/verify.dart';
 export 'src/x509.dart';
