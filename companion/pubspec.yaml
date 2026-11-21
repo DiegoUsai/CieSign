@@ -36,6 +36,10 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   crypto: ^3.0.8
+  ciesign_link:
+    path: ../packages/ciesign_link
+  mobile_scanner: ^7.5.0
+  path_provider: ^2.1.6
 
 dev_dependencies:
   flutter_test:

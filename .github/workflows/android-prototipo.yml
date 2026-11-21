@@ -51,6 +51,13 @@ jobs:
           flutter pub get
           flutter analyze
           flutter test
+      # Stessa chiave di debug a ogni build, così il nuovo APK si installa sopra il
+      # precedente senza disinstallarlo e l'abbinamento con il PC non si perde.
+      - name: Chiave di debug stabile
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
       - name: Build APK debug
         working-directory: companion
         run: flutter build apk --debug --build-number=${{ github.run_number }} --dart-define=BUILD_ID=build-${{ github.run_number }}
