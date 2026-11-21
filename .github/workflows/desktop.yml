@@ -1,0 +1,102 @@
+# Collaudo del motore di firma e del protocollo, build dell'app desktop per
+# Windows (prima piattaforma) e macOS.
+name: App desktop
+
+on:
+  push:
+    branches: [main, "claude/**"]
+    paths: ["desktop/**", "packages/**", "tools/**", ".github/workflows/desktop.yml"]
+  pull_request:
+    paths: ["desktop/**", "packages/**", "tools/**", ".github/workflows/desktop.yml"]
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: "3.50.1"
+
+jobs:
+  test:
+    name: Test e conformità delle firme
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Motore di firma (ciesign_ades)
+        working-directory: packages/ciesign_ades
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart test
+      - name: Protocollo PC-telefono (ciesign_link)
+        working-directory: packages/ciesign_link
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart test
+      - name: App desktop
+        working-directory: desktop
+        run: |
+          flutter pub get
+          flutter analyze --fatal-infos
+          flutter test
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Validazione con EU DSS dei file firmati dai test
+        working-directory: tools/dss-validator
+        run: mvn -q -B compile exec:java -Dexec.args="../../packages/ciesign_ades/test/resources/titolare-test.der $(ls ../../packages/ciesign_ades/build/test-output/* | tr '\n' ' ')"
+      - name: File firmati di esempio
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: file-firmati-di-prova
+          path: packages/ciesign_ades/build/test-output
+
+  windows:
+    name: Build Windows
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Build
+        working-directory: desktop
+        run: |
+          flutter pub get
+          flutter build windows --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cie-sign-windows
+          path: desktop/build/windows/x64/runner/Release
+
+  macos:
+    name: Build macOS
+    runs-on: macos-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Build
+        working-directory: desktop
+        run: |
+          flutter pub get
+          flutter build macos --release
+      - name: Archivio dell'app
+        run: ditto -c -k --keepParent "desktop/build/macos/Build/Products/Release/cie_sign_desktop.app" cie-sign-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cie-sign-macos
+          path: cie-sign-macos.zip

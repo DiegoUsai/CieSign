@@ -1,0 +1,17 @@
+name: ciesign_link
+description: Protocollo di CIE Sign tra PC e smartphone (abbinamento con QR e codice di sei cifre, canale cifrato, messaggi di firma).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  crypto: ^3.0.8
+  cryptography: ^2.9.0
+  ciesign_ades:
+    path: ../ciesign_ades
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^6.0.0
