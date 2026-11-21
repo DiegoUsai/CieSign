@@ -29,6 +29,50 @@ void main() {
     });
   });
 
+  group('catena CIE', () {
+    test('le CA intermedie risalgono alle radici del Ministero', () {
+      for (final ca in CieTrust.intermediates) {
+        final r = CieTrust.verify(ca, at: DateTime.utc(2030, 1, 1));
+        expect(r.status, ChainStatus.cie, reason: ca.subject.toString());
+        expect(r.path.length, 2);
+        expect(CieTrust.roots, contains(r.path.last));
+      }
+    });
+
+    test('SUBCA003 è emessa dalla radice del 2024', () {
+      final sub3 = CieTrust.intermediates.last;
+      expect(sub3.subject.get(Oids.commonName), endsWith('SUBCA003'));
+      expect(CieTrust.verify(sub3).path.last.notAfter.year, 2044);
+    });
+
+    test('fuori validità alla data della firma', () {
+      final subca1 = CieTrust.intermediates.first;
+      expect(CieTrust.verify(subca1, at: DateTime.utc(2032, 1, 1)).status, ChainStatus.cieExpired);
+    });
+
+    test('un certificato di altri emittenti non è CIE', () {
+      final r = CieTrust.verify(cert);
+      expect(r.status, ChainStatus.unknownIssuer);
+      expect(r.isCieFea, isFalse);
+      expect(CieTrust.intermediateFor(cert), isNull);
+    });
+
+    test('una firma alterata con il nome della CA della CIE rompe la catena', () {
+      final der = Uint8List.fromList(CieTrust.intermediates.last.der);
+      der[der.length - 10] ^= 0xFF;
+      final r = CieTrust.verify(Certificate.fromDer(der));
+      expect(r.status, ChainStatus.brokenChain);
+    });
+
+    test('le radici sono quelle pubblicate dal Ministero', () {
+      String hex(List<int> b) => b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
+      expect(CieTrust.roots.map((r) => hex(r.sha256Fingerprint)), [
+        '87364fb476e74962e7c495b9bbaf727813ee007cb56a0ada6ab9868123db267e',
+        '40f425927e8a1e6a297a15c2a9d79e2221bf4fe25b2f21e3bfad53a1ba58b0d7',
+      ]);
+    });
+  });
+
   group('DER', () {
     test('SET OF ordinato e OID', () {
       final s = Der.setOf([Der.smallInt(300), Der.smallInt(1)]);

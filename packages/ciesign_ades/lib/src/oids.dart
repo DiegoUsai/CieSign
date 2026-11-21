@@ -22,4 +22,8 @@ class Oids {
   static const country = '2.5.4.6';
   static const organization = '2.5.4.10';
   static const givenName = '2.5.4.42';
+
+  static const keyUsage = '2.5.29.15';
+  static const basicConstraints = '2.5.29.19';
+  static const extKeyUsage = '2.5.29.37';
 }

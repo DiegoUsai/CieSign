@@ -5,11 +5,12 @@ import 'package:crypto/crypto.dart';
 import 'cms.dart';
 import 'pdf/pdf_document.dart';
 import 'pdf/pdf_objects.dart';
+import 'trust.dart';
 import 'x509.dart';
 
-/// Esito della verifica di una firma. Questa prima versione controlla
-/// l'integrità crittografica; la catena fino alla CA del Ministero
-/// dell'Interno e lo stato di revoca (OCSP o CRL) arriveranno in seguito.
+/// Esito della verifica di una firma: integrità crittografica e catena fino
+/// alle CA della CIE del Ministero dell'Interno ([chain]). Lo stato di revoca
+/// (OCSP o CRL) non è ancora controllato.
 class SignatureReport {
   SignatureReport({
     required this.integrity,
@@ -19,7 +20,11 @@ class SignatureReport {
     this.fieldName,
     this.coversWholeDocument,
     this.subFilter,
+    this.chain,
   });
+
+  /// Catena del firmatario verso le CA della CIE; nullo senza certificato.
+  final ChainReport? chain;
 
   final SignatureIntegrity integrity;
   final Certificate? certificate;
@@ -51,6 +56,7 @@ class CadesFile {
           certificate: s.certificate,
           signingTime: s.signingTime,
           hasTimestamp: s.hasSignatureTimestamp,
+          chain: _chain(s.certificate, cms.certificates, s.signingTime),
         ),
     ];
     return CadesFile._(cms, reports);
@@ -128,6 +134,7 @@ class PadesVerifier {
       fieldName: name,
       coversWholeDocument: covers,
       subFilter: sub,
+      chain: _chain(s.certificate, cms.certificates, s.signingTime ?? _parsePdfDate(sig['M'])),
     );
   }
 
@@ -154,5 +161,14 @@ class PadesVerifier {
     if (m == null) return null;
     int g(int i, int d) => m[i] == null ? d : int.parse(m[i]!);
     return DateTime.utc(g(1, 0), g(2, 1), g(3, 1), g(4, 0), g(5, 0), g(6, 0));
+  }
+}
+
+ChainReport? _chain(Certificate? signer, List<Certificate> extra, DateTime? at) {
+  if (signer == null) return null;
+  try {
+    return CieTrust.verify(signer, extra: extra, at: at);
+  } on Object {
+    return ChainReport(ChainStatus.brokenChain, [signer]);
   }
 }
