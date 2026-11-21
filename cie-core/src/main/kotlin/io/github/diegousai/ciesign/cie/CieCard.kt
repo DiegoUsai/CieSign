@@ -40,13 +40,23 @@ class CieCard internal constructor(
     /** Stabilisce il canale sicuro con la carta. Va chiamato prima di ogni altra operazione. */
     fun openSecureChannel() {
         log("Selezione dell'applicazione IAS")
-        val ias = sendPlain(SELECT_AID, CieConstants.IAS_AID)
-        if (!ias.isOk) throw NotACieException()
+        // Come l'SDK ufficiale, l'esito delle selezioni non blocca la sequenza: alcune carte
+        // rispondono in modo diverso a seconda di P2. Si riprova con P2=00 e si prosegue.
+        var ias = sendPlain(SELECT_AID, CieConstants.IAS_AID)
+        if (!ias.isOk) {
+            log("Selezione IAS con P2=0C: SW=%04X, riprovo con P2=00".format(ias.sw))
+            ias = sendPlain(SELECT_AID_FCI, CieConstants.IAS_AID, 0x00)
+            if (!ias.isOk) log("Selezione IAS con P2=00: SW=%04X".format(ias.sw))
+        }
         val cie = sendPlain(SELECT_AID, CieConstants.CIE_AID)
         if (!cie.isOk) log("Selezione AID CIE: SW=%04X".format(cie.sw))
 
         log("Lettura dei parametri Diffie-Hellman")
-        dhG = readDhParam(0x97)
+        try {
+            dhG = readDhParam(0x97)
+        } catch (e: CardStatusException) {
+            throw NotACieException("selezione IAS SW=%04X, selezione CIE SW=%04X, parametri DH SW=%04X".format(ias.sw, cie.sw, e.sw))
+        }
         dhP = readDhParam(0x98)
         dhQ = readDhParam(0x99)
 
@@ -320,6 +330,7 @@ class CieCard internal constructor(
 
     companion object {
         private val SELECT_AID = byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x0C)
+        private val SELECT_AID_FCI = byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00)
         private val GET_DATA = byteArrayOf(0x00, 0xCB.toByte(), 0x3F, 0xFF.toByte())
 
         /** Elimina eventuali byte di riempimento dopo la struttura DER del certificato. */

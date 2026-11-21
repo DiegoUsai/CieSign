@@ -30,11 +30,14 @@ class CieResult {
 
 /// Errore riportato dalla carta o dal lettore NFC.
 class CieError implements Exception {
-  CieError(this.code, this.message, [this.remainingAttempts]);
+  CieError(this.code, this.message, {this.remainingAttempts, this.trace});
 
   final String code;
   final String message;
   final int? remainingAttempts;
+
+  /// Registro tecnico dei comandi scambiati con la carta (senza dati né PIN).
+  final String? trace;
 
   @override
   String toString() => message;
@@ -63,7 +66,13 @@ class CieBridge {
       final m = await _channel.invokeMapMethod<Object?, Object?>('start', {'pin': pin, 'digest': digest});
       return CieResult.fromMap(m!);
     } on PlatformException catch (e) {
-      throw CieError(e.code, e.message ?? e.code, e.code == 'WRONG_PIN' ? e.details as int? : null);
+      final details = e.details;
+      throw CieError(
+        e.code,
+        e.message ?? e.code,
+        remainingAttempts: details is int ? details : null,
+        trace: details is String ? details : null,
+      );
     }
   }
 

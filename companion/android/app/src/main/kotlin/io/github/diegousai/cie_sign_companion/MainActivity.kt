@@ -103,12 +103,24 @@ class MainActivity : FlutterActivity() {
                 return@execute
             }
             val started = System.currentTimeMillis()
+            val trace = StringBuilder()
             try {
                 isoDep.connect()
                 isoDep.timeout = 10_000
                 status("Carta rilevata, non allontanarla")
-                val transport = ApduTransport { apdu -> isoDep.transceive(apdu) }
-                val session = CieSigner.run(transport, request.pin, request.digest) { status(it) }
+                trace.append("Tecnologie: ").append(tag.techList.joinToString { it.substringAfterLast('.') }).append('\n')
+                isoDep.historicalBytes?.let { trace.append("Historical bytes (NFC-A): ").append(hex(it)).append('\n') }
+                isoDep.hiLayerResponse?.let { trace.append("Higher layer response (NFC-B): ").append(hex(it)).append('\n') }
+                // Registro dei comandi: solo intestazione e status word, mai i dati (PIN compreso).
+                val transport = ApduTransport { apdu ->
+                    val resp = isoDep.transceive(apdu)
+                    val lc = if (apdu.size > 4) " Lc=%02X".format(apdu[4].toInt() and 0xFF) else ""
+                    val sw = if (resp.size >= 2) hex(resp.copyOfRange(resp.size - 2, resp.size)) else "??"
+                    trace.append("> ").append(hex(apdu.copyOfRange(0, 4))).append(lc)
+                        .append("  < SW=").append(sw).append(" (").append(resp.size - 2).append(" byte)\n")
+                    resp
+                }
+                val session = CieSigner.run(transport, request.pin, request.digest) { trace.append("# ").append(it).append('\n'); status(it) }
                 val cert = CieSigner.parseCertificate(session.certificate)
                 val fmt = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY)
                 val payload = mapOf(
@@ -128,17 +140,17 @@ class MainActivity : FlutterActivity() {
             } catch (e: WrongPinException) {
                 finish(request) { it.error("WRONG_PIN", e.message, e.remainingAttempts) }
             } catch (e: PinBlockedException) {
-                finish(request) { it.error("PIN_BLOCKED", e.message, null) }
+                finish(request) { it.error("PIN_BLOCKED", e.message, trace.toString()) }
             } catch (e: InvalidPinFormatException) {
-                finish(request) { it.error("BAD_PIN", e.message, null) }
+                finish(request) { it.error("BAD_PIN", e.message, trace.toString()) }
             } catch (e: NotACieException) {
-                finish(request) { it.error("NOT_CIE", e.message, null) }
+                finish(request) { it.error("NOT_CIE", e.message, trace.toString()) }
             } catch (e: IOException) {
-                finish(request) { it.error("TAG_LOST", "Collegamento con la carta interrotto: tienila ferma e riprova", e.message) }
+                finish(request) { it.error("TAG_LOST", "Collegamento con la carta interrotto: tienila ferma e riprova", "$trace${e.message}") }
             } catch (e: CieException) {
-                finish(request) { it.error("CIE_ERROR", e.message, null) }
+                finish(request) { it.error("CIE_ERROR", e.message, trace.toString()) }
             } catch (e: Exception) {
-                finish(request) { it.error("UNEXPECTED", e.toString(), null) }
+                finish(request) { it.error("UNEXPECTED", e.toString(), trace.toString()) }
             } finally {
                 try { isoDep.close() } catch (_: IOException) { }
             }
@@ -163,6 +175,8 @@ class MainActivity : FlutterActivity() {
     private fun status(text: String) {
         main.post { channel.invokeMethod("status", text) }
     }
+
+    private fun hex(b: ByteArray) = b.joinToString("") { "%02X".format(it.toInt() and 0xFF) }
 
     override fun onPause() {
         super.onPause()

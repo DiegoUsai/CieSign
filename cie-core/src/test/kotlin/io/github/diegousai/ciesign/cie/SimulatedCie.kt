@@ -18,6 +18,8 @@ class SimulatedCie(
     var remainingAttempts: Int = 3,
     /** Se vero, un PIN errato è restituito come status esterno non protetto. */
     private val plainPinErrors: Boolean = false,
+    /** Se vero, la selezione dell'AID con P2=0C fallisce, come su alcune carte reali. */
+    private val rejectSelectWithoutFci: Boolean = false,
 ) : ApduTransport {
 
     val certificateDer: ByteArray = javaClass.getResource("/titolare-test.der")!!.readBytes()
@@ -85,6 +87,7 @@ class SimulatedCie(
         chainBuffer = ByteArray(0)
 
         return when {
+            ins == 0xA4 && p1 == 0x04 && p2 == 0x0C && rejectSelectWithoutFci -> sw(0x6A86)
             ins == 0xA4 && p1 == 0x04 -> if (full.contentEquals(CieConstants.IAS_AID) || full.contentEquals(CieConstants.CIE_AID)) sw(0x9000) else sw(0x6A82)
             ins == 0xA4 && p1 == 0x02 -> { selectedFile = fileId(full); sw(0x9000) }
             ins == 0xB0 -> readBinary(p1 shl 8 or p2, (apdu.last().toInt() and 0xFF).let { if (it == 0) 256 else it }, plain = true)

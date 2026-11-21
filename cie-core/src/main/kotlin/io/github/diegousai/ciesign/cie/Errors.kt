@@ -4,7 +4,8 @@ package io.github.diegousai.ciesign.cie
 open class CieException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /** La carta avvicinata non è una CIE o non espone l'applicazione IAS ECC. */
-class NotACieException : CieException("La carta avvicinata non sembra una CIE 3.0")
+class NotACieException(detail: String) :
+    CieException("La carta non risponde come una CIE 3.0 ($detail)")
 
 /** PIN errato: [remainingAttempts] indica i tentativi rimasti prima del blocco. */
 class WrongPinException(val remainingAttempts: Int) :

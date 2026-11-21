@@ -188,7 +188,34 @@ class _PrototypePageState extends State<PrototypePage> {
                 color: theme.colorScheme.errorContainer,
                 child: Padding(
                   padding: const EdgeInsets.all(12),
-                  child: Text(_errorText(_error!)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_errorText(_error!)),
+                      if (_error!.trace != null && _error!.trace!.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        ExpansionTile(
+                          tilePadding: EdgeInsets.zero,
+                          title: const Text('Dettagli tecnici'),
+                          children: [
+                            SelectableText(
+                              _error!.trace!,
+                              style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                            ),
+                          ],
+                        ),
+                        OutlinedButton.icon(
+                          icon: const Icon(Icons.copy),
+                          label: const Text('Copia i dettagli tecnici'),
+                          onPressed: () async {
+                            final messenger = ScaffoldMessenger.of(context);
+                            await Clipboard.setData(ClipboardData(text: '${_error!.message}\n\n${_error!.trace}'));
+                            messenger.showSnackBar(const SnackBar(content: Text('Dettagli copiati')));
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -249,9 +276,9 @@ class _PrototypePageState extends State<PrototypePage> {
               icon: const Icon(Icons.copy),
               label: const Text('Copia il risultato per il PC'),
               onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
                 await Clipboard.setData(ClipboardData(text: _export(r)));
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Risultato copiato')));
+                messenger.showSnackBar(const SnackBar(content: Text('Risultato copiato')));
               },
             ),
           ],

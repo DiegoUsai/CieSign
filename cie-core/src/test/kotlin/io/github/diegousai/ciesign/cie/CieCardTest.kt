@@ -86,6 +86,13 @@ class CieCardTest {
     }
 
     @Test
+    fun `la firma funziona anche se la carta rifiuta la selezione con P2=0C`() {
+        val card = SimulatedCie(rejectSelectWithoutFci = true)
+        val digest = CieSigner.sha256("prova".toByteArray())
+        assertEquals(true, runSession(card, "12345678", digest).signatureValid)
+    }
+
+    @Test
     fun `una carta diversa dalla CIE viene riconosciuta`() {
         val notCie = ApduTransport { byteArrayOf(0x6A, 0x82.toByte()) }
         assertFailsWith<NotACieException> { CieCard(notCie).openSecureChannel() }
