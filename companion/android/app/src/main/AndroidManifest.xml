@@ -4,6 +4,9 @@
     <uses-feature android:name="android.hardware.nfc" android:required="true" />
     <!-- Collegamento cifrato con il PC sulla Wi-Fi di casa. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- WebRTC (collegamento via internet) controlla lo stato della rete. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <application
         android:label="CIE Sign"

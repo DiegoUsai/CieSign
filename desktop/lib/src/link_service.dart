@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:bonsoir/bonsoir.dart';
 import 'package:ciesign_link/ciesign_link.dart';
+import 'package:ciesign_webrtc/ciesign_webrtc.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -18,12 +19,22 @@ export 'key_store.dart';
 /// (Windows Credential Manager, Portachiavi di macOS, libsecret su Linux);
 /// nel file JSON della cartella dati restano solo identificativo, nome e
 /// chiavi pubbliche dei telefoni abbinati, che non sono segreti.
+///
+/// Oltre alla rete locale, se la build ha un servizio di signaling
+/// ([SignalingConfig.fromEnvironment]) e l'utente sceglie "Il telefono non è
+/// sulla stessa rete", il PC ascolta anche via internet: una stanza per ogni
+/// telefono abbinato e una per il QR code mostrato. Le
+/// sessioni che arrivano da WebRTC seguono la stessa strada di quelle TCP.
 class LinkService extends ChangeNotifier {
-  LinkService._(this._file, this.identity, this._paired, this.keyInSystemStore);
+  LinkService._(this._file, this.identity, this._paired, this.keyInSystemStore, this._rendezvous, this._internet);
 
   static const _seedKey = 'ciesign.pc.seed';
 
-  static Future<LinkService> open({KeyStore? keyStore}) async {
+  static Future<LinkService> open({
+    KeyStore? keyStore,
+    SignalingConfig? signaling,
+    PeerLinkFactory peers = createWebRtcPeer,
+  }) async {
     // Su Linux libsecret termina il processo se manca un servizio portachiavi
     // attivo: finché Linux non è una piattaforma supportata, il seme resta nel file.
     final store = keyStore ?? (Platform.isLinux ? MemoryKeyStore(broken: true) : SystemKeyStore());
@@ -37,10 +48,15 @@ class LinkService extends ChangeNotifier {
     };
     final idJson = j['identity'] as Map<String, Object?>?;
     final loaded = await loadIdentity(idJson, store, fallbackName: Platform.localHostname);
-    final s = LinkService._(file, loaded.identity, paired, loaded.inSystemStore);
+    final config = signaling ?? SignalingConfig.fromEnvironment();
+    final rv = config == null ? null : Rendezvous(SignalingClient(config), peers);
+    final s = LinkService._(file, loaded.identity, paired, loaded.inSystemStore, rv, j['internet'] == true);
     s._save();
     await s._startServer();
     await s._announce();
+    for (final p in paired.values) {
+      await s._listenRemote(p);
+    }
     return s;
   }
 
@@ -104,6 +120,75 @@ class LinkService extends ChangeNotifier {
       lastError = 'Annuncio mDNS non disponibile: $e';
     }
   }
+
+  final Rendezvous? _rendezvous;
+  final _remote = <String, StreamSubscription<FrameChannel>>{};
+  static const _pairingRoom = '#pairing';
+
+  /// Vero se questa build sa collegarsi via internet.
+  bool get remoteAvailable => _rendezvous != null;
+
+  bool _internet;
+
+  /// Scelta dell'utente "Il telefono non è sulla stessa rete", spenta in
+  /// partenza: senza, il PC non contatta nessun servizio esterno.
+  bool get internetEnabled => _internet;
+
+  /// Vero se il PC ascolta anche via internet.
+  bool get remoteEnabled => remoteAvailable && _internet;
+
+  /// Accende o spegne l'ascolto via internet. Se è in corso un abbinamento,
+  /// il QR code si rigenera con o senza l'indicazione r=1.
+  Future<void> setInternetEnabled(bool on) async {
+    if (on == _internet) return;
+    _internet = on;
+    _save();
+    if (on) {
+      for (final p in _paired.values) {
+        await _listenRemote(p);
+      }
+    } else {
+      for (final sub in _remote.values) {
+        await sub.cancel();
+      }
+      _remote.clear();
+      remoteError = null;
+    }
+    if (pairingOffer != null && pairingSession == null) {
+      await startPairing();
+    } else {
+      notifyListeners();
+    }
+  }
+
+  /// Ultimo problema del collegamento via internet, da mostrare con
+  /// discrezione: la rete locale continua a funzionare.
+  String? remoteError;
+
+  void _watchRoom(String key, Room room) {
+    final rv = _rendezvous;
+    if (rv == null || !_internet) return;
+    _remote.remove(key)?.cancel();
+    _remote[key] = rv
+        .listen(room)
+        .listen(
+          (ch) {
+            remoteError = null;
+            _server?.accept(ch);
+          },
+          onError: (Object e) {
+            remoteError = '$e';
+            notifyListeners();
+          },
+        );
+  }
+
+  Future<void> _listenRemote(PairedDevice p) async {
+    if (!remoteEnabled) return;
+    _watchRoom(p.id, await Room.forPairedDevices(identity.keyPair, p.publicKey));
+  }
+
+  void _stopPairingRoom() => _remote.remove(_pairingRoom)?.cancel();
 
   final File _file;
   final DeviceIdentity identity;
@@ -180,7 +265,8 @@ class LinkService extends ChangeNotifier {
     _phoneConfirmed = null;
     _pcConfirmed = null;
     pairingSession = null;
-    pairingOffer = await _server!.newPairingOffer();
+    pairingOffer = await _server!.newPairingOffer(remote: remoteEnabled);
+    if (remoteEnabled) _watchRoom(_pairingRoom, await Room.forPairing(pairingOffer!.token));
     notifyListeners();
     return pairingOffer!;
   }
@@ -197,6 +283,7 @@ class LinkService extends ChangeNotifier {
     pairingSession = null;
     pairingOffer = null;
     _server?.pendingOffer = null;
+    _stopPairingRoom();
     notifyListeners();
   }
 
@@ -216,8 +303,10 @@ class LinkService extends ChangeNotifier {
         pairedAt: DateTime.now(),
       );
       _save();
+      unawaited(_listenRemote(_paired[c.peerId]!));
       pairingOffer = null;
       _server?.pendingOffer = null;
+      _stopPairingRoom();
       // La sessione dell'abbinamento diventa quella attiva.
       pairingSession = null;
       _active?.close();
@@ -229,6 +318,7 @@ class LinkService extends ChangeNotifier {
 
   void unpair(String id) {
     _paired.remove(id);
+    _remote.remove(id)?.cancel();
     if (_active?.peerId == id) {
       _active?.close();
       _active = null;
@@ -257,12 +347,22 @@ class LinkService extends ChangeNotifier {
     // Il seme va nel file solo se il portachiavi di sistema non funziona.
     if (keyInSystemStore) id.remove('seed');
     _file.parent.createSync(recursive: true);
-    _file.writeAsStringSync(jsonEncode({'identity': id, 'paired': _paired.values.map((p) => p.toJson()).toList()}));
+    _file.writeAsStringSync(
+      jsonEncode({
+        'identity': id,
+        'paired': _paired.values.map((p) => p.toJson()).toList(),
+        if (_internet) 'internet': true,
+      }),
+    );
   }
 
   @override
   void dispose() {
     _broadcast?.stop();
+    for (final s in _remote.values) {
+      s.cancel();
+    }
+    _rendezvous?.signaling.close();
     _server?.close();
     _active?.close();
     super.dispose();

@@ -8,7 +8,9 @@ import 'keys.dart';
 ///   canale che un attaccante in rete non può alterare (lo schermo).
 /// - `t` è un segreto monouso: dimostra al PC che chi si collega ha visto il QR.
 /// - `a` sono gli indirizzi del PC sulla rete locale, utili se **mDNS** non
-///   funziona; `b=1` indica che il PC accetta anche il Bluetooth.
+///   funziona; `b=1` indica che il PC accetta anche il Bluetooth;
+/// - `r=1` indica che il PC ascolta anche via internet (**WebRTC**), nella
+///   stanza del servizio di signaling che deriva da `t`.
 class PairingOffer {
   PairingOffer({
     required this.pcId,
@@ -17,6 +19,7 @@ class PairingOffer {
     required this.token,
     required this.addresses,
     this.bluetooth = false,
+    this.remote = false,
     this.version = 1,
   });
 
@@ -27,6 +30,7 @@ class PairingOffer {
   final List<int> token;
   final List<String> addresses;
   final bool bluetooth;
+  final bool remote;
 
   static const scheme = 'ciesign';
 
@@ -41,6 +45,7 @@ class PairingOffer {
       't': b64u(token),
       if (addresses.isNotEmpty) 'a': addresses.join(','),
       if (bluetooth) 'b': '1',
+      if (remote) 'r': '1',
     },
   );
 
@@ -60,6 +65,7 @@ class PairingOffer {
       token: t,
       addresses: (q['a'] ?? '').split(',').where((s) => s.isNotEmpty).toList(),
       bluetooth: q['b'] == '1',
+      remote: q['r'] == '1',
     );
   }
 }

@@ -1,0 +1,19 @@
+# Servizio di signaling di CIE Sign su Cloudflare Workers + Durable Objects.
+# Espone lo stesso sottoinsieme dell'API REST del Firebase Realtime Database
+# usato dalle app: per passare da Firebase a qui basta cambiare
+# CIESIGN_SIGNALING_URL e togliere CIESIGN_FIREBASE_API_KEY.
+name = "ciesign-signal"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "Room"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Room"]
+
+# Credenziali TURN (facoltative), da impostare come segreti:
+#   npx wrangler secret put TURN_KEY_ID
+#   npx wrangler secret put TURN_KEY_API_TOKEN

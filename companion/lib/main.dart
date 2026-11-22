@@ -221,20 +221,22 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         null,
         'Nessun PC abbinato',
         'Sul PC apri CIE Sign, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto '
-            'oppure con la fotocamera del telefono. Telefono e PC devono essere sulla stessa Wi-Fi.',
+            'oppure con la fotocamera del telefono.${link.remoteEnabled ? '' : ' Telefono e PC devono essere sulla stessa Wi-Fi.'}',
       ),
       LinkState.connected => (
         Icons.link,
         Colors.green,
         'Collegato a $pcName',
-        'In attesa di richieste dal PC. Tieni aperta l\'app durante la firma.',
+        '${link.viaInternet ? 'Via internet. ' : ''}In attesa di richieste dal PC. Tieni aperta l\'app durante la firma.',
       ),
       LinkState.connecting => (Icons.sync, null, 'Collegamento a $pcName…', ''),
       LinkState.disconnected => (
         Icons.link_off,
         theme.colorScheme.error,
         '$pcName non raggiungibile',
-        'Controlla che CIE Sign sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
+        link.remoteEnabled
+            ? 'Controlla che CIE Sign sia aperto sul PC e che PC e telefono siano collegati a internet.'
+            : 'Controlla che CIE Sign sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
       ),
     };
     return Card(
@@ -256,8 +258,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const SizedBox(height: 12),
             if (link.state == LinkState.notPaired)
               FilledButton.icon(onPressed: _scan, icon: const Icon(Icons.qr_code_scanner), label: const Text('Abbina PC')),
+            if (link.state == LinkState.disconnected && link.suggestInternet && !link.internetEnabled) ...[
+              const Text(
+                'Se il telefono non è sulla stessa rete del PC, per esempio in 4G o su un\'altra Wi-Fi, '
+                'puoi collegarti via internet. Sul PC va attivata la stessa opzione.',
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () {
+                  link.setInternetEnabled(true);
+                  link.connect();
+                },
+                icon: const Icon(Icons.public),
+                label: const Text('Non sono sulla stessa rete'),
+              ),
+              const SizedBox(height: 8),
+            ],
             if (link.state == LinkState.disconnected)
               FilledButton.icon(onPressed: link.connect, icon: const Icon(Icons.refresh), label: const Text('Ricollega')),
+            if (link.remoteAvailable && link.state != LinkState.notPaired)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Non sono sulla stessa rete'),
+                subtitle: const Text('Collegamento via internet quando il PC non è sulla rete locale'),
+                value: link.internetEnabled,
+                onChanged: (v) {
+                  link.setInternetEnabled(v);
+                  if (v && link.state == LinkState.disconnected) link.connect();
+                },
+              ),
           ],
         ),
       ),
