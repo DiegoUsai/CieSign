@@ -154,7 +154,7 @@ class _SignFilePageState extends State<SignFilePage> {
     final doc = _doc;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Firma un documento'),
+        title: Text(doc?.name ?? 'Apri un documento', maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           if (doc != null) IconButton(tooltip: 'Scegli un altro file', onPressed: _pick, icon: const Icon(Icons.folder_open)),
         ],
@@ -195,7 +195,6 @@ class _SignFilePageState extends State<SignFilePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(doc.name, style: theme.textTheme.titleMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
               Text(
                 [
                   _size(doc.bytes.length),
