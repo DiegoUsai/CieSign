@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:ciesign_link/ciesign_link.dart';
 import 'package:crypto/crypto.dart';
+import 'package:firmami_brand/firmami_brand.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
@@ -21,7 +22,7 @@ void main() => runApp(const CieSignCompanionApp());
 const _buildId = String.fromEnvironment('BUILD_ID', defaultValue: 'locale');
 
 ThemeData _theme(Brightness b) =>
-    ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0066CC), brightness: b));
+    ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: FirmamiColors.red, brightness: b));
 
 class CieSignCompanionApp extends StatelessWidget {
   const CieSignCompanionApp({super.key, this.home});
@@ -32,10 +33,11 @@ class CieSignCompanionApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CIE Sign',
+      title: FirmamiColors.appName,
       theme: _theme(Brightness.light),
       darkTheme: _theme(Brightness.dark),
-      home: home ?? const HomePage(),
+      // Lo splash animato parte solo nell'app vera; i test passano [home].
+      home: home ?? const SplashGate(child: HomePage()),
     );
   }
 }
@@ -204,7 +206,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final link = _link;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CIE Sign · prototipo $_buildId'),
+        title: const Text('Firmami · prototipo $_buildId'),
         actions: [
           if (link?.pc != null)
             PopupMenuButton<String>(
@@ -285,7 +287,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         Icons.qr_code_scanner,
         null,
         'Nessun PC abbinato',
-        'Sul PC apri CIE Sign, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto '
+        'Sul PC apri Firmami, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto '
             'oppure con la fotocamera del telefono. Telefono e PC devono essere sulla stessa Wi-Fi.',
       ),
       LinkState.connected => (
@@ -299,7 +301,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         Icons.link_off,
         theme.colorScheme.error,
         '$pcName non raggiungibile',
-        'Controlla che CIE Sign sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
+        'Controlla che Firmami sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
       ),
     };
     return Card(
@@ -351,7 +353,7 @@ class PrototypePage extends StatefulWidget {
 class _PrototypePageState extends State<PrototypePage> {
   CieBridge get _bridge => widget.bridge;
   final _pin = TextEditingController();
-  final _text = TextEditingController(text: 'Prova di firma con CIE Sign');
+  final _text = TextEditingController(text: 'Prova di firma con Firmami');
 
   bool _busy = false;
   bool _sign = true;

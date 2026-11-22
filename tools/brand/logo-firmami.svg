@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+  <!-- Logo di Firmami, variante A: telefono a forma di penna bianco su rosso, con la firma -->
+  <rect width="120" height="120" rx="28" fill="#D81E3F"/>
+  <g transform="rotate(35 60 60)">
+    <path d="M52 8h16a9 9 0 0 1 9 9v50L60 102 43 67V17a9 9 0 0 1 9-9z" fill="#FFFFFF"/>
+    <rect x="49" y="16" width="22" height="40" rx="4" fill="#D81E3F"/>
+    <circle cx="60" cy="76" r="3.2" fill="#D81E3F"/>
+    <path d="M60 80v18" stroke="#D81E3F" stroke-width="2.4" stroke-linecap="round"/>
+  </g>
+  <path d="M38 92C46 82 52 96 60 89S70 77 76 85 84 89 92 81" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round"/>
+</svg>

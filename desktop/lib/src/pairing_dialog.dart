@@ -56,7 +56,7 @@ class _PairingDialogState extends State<PairingDialog> {
       body = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Apri CIE Sign sullo smartphone, scegli "Abbina PC" e inquadra il codice.'),
+          const Text('Apri Firmami sullo smartphone, scegli "Abbina PC" e inquadra il codice.'),
           const SizedBox(height: 16),
           Container(
             color: Colors.white,

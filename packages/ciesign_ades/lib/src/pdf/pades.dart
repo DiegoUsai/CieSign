@@ -155,7 +155,7 @@ class PadesPreparation {
       'M': PdfString(Uint8List.fromList(latin1.encode(_pdfDate(when)))),
       'Name': PdfString.text(certificate.holderName),
       'Prop_Build': PdfDict({
-        'App': PdfDict({'Name': const PdfName('CIE Sign')}),
+        'App': PdfDict({'Name': const PdfName('Firmami')}),
       }),
       if (reason != null) 'Reason': PdfString.text(reason),
       if (location != null) 'Location': PdfString.text(location),

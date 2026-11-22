@@ -91,7 +91,7 @@ class LinkService extends ChangeNotifier {
     try {
       final b = BonsoirBroadcast(
         service: BonsoirService(
-          name: 'CIE Sign su ${identity.name}',
+          name: 'Firmami su ${identity.name}',
           type: PcLinkServer.mdnsService,
           port: port,
           attributes: {'id': identity.id, 'v': '1'},

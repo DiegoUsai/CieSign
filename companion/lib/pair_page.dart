@@ -34,7 +34,7 @@ class _ScanPageState extends State<ScanPage> {
         Navigator.of(context).pop(offer);
         return;
       } on FormatException catch (e) {
-        setState(() => _hint = '${e.message}. Inquadra il QR code mostrato da CIE Sign sul PC.');
+        setState(() => _hint = '${e.message}. Inquadra il QR code mostrato da Firmami sul PC.');
       }
     }
   }
@@ -53,7 +53,7 @@ class _ScanPageState extends State<ScanPage> {
               color: Colors.black54,
               padding: const EdgeInsets.all(16),
               child: Text(
-                _hint ?? 'Sul PC apri CIE Sign, scegli "Abbina smartphone" e inquadra il codice.',
+                _hint ?? 'Sul PC apri Firmami, scegli "Abbina smartphone" e inquadra il codice.',
                 style: const TextStyle(color: Colors.white),
                 textAlign: TextAlign.center,
               ),
@@ -117,7 +117,7 @@ class _PairPageState extends State<PairPage> {
     final s = '$e';
     if (e is LinkException && s.startsWith('PC non raggiungibile')) {
       return 'Il PC non risponde. Controlla che telefono e PC siano sulla stessa Wi-Fi e che il firewall '
-          'di Windows consenta a CIE Sign di ricevere collegamenti sulle reti private.\n\nDettaglio: $s';
+          'di Windows consenta a Firmami di ricevere collegamenti sulle reti private.\n\nDettaglio: $s';
     }
     return s;
   }

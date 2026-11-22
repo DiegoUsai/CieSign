@@ -46,7 +46,7 @@ class PairingOffer {
 
   factory PairingOffer.parse(String text) {
     final u = Uri.parse(text.trim());
-    if (u.scheme != scheme || u.host != 'pair') throw const FormatException('QR code non di CIE Sign');
+    if (u.scheme != scheme || u.host != 'pair') throw const FormatException('QR code non di Firmami');
     final q = u.queryParameters;
     final v = int.tryParse(q['v'] ?? '');
     if (v != 1) throw FormatException('Versione del protocollo non supportata: ${q['v']}');

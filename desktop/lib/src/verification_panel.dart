@@ -163,7 +163,7 @@ const verificationLimits =
 /// Rapporto di verifica in testo semplice, da copiare negli appunti.
 String verificationReportText(String documentName, List<SignatureReport> reports, {required bool pades}) {
   final b = StringBuffer()
-    ..writeln('Rapporto di verifica CIE Sign')
+    ..writeln('Rapporto di verifica Firmami')
     ..writeln('Documento: $documentName')
     ..writeln('Verificato il: ${formatDate(DateTime.now(), seconds: true)}')
     ..writeln('Esito: ${overallText(reports)}')

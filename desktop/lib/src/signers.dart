@@ -71,7 +71,7 @@ class PhoneSigner implements CardSigner {
 
   SecureChannel get _session {
     final s = link.activeSession;
-    if (s == null) throw SignFailure('Nessuno smartphone collegato: apri CIE Sign sul telefono.');
+    if (s == null) throw SignFailure('Nessuno smartphone collegato: apri Firmami sul telefono.');
     return s;
   }
 

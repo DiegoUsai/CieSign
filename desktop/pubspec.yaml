@@ -42,6 +42,8 @@ dependencies:
   desktop_drop: ^0.8.4
   ciesign_ades:
     path: ../packages/ciesign_ades
+  firmami_brand:
+    path: ../packages/firmami_brand
   ciesign_link:
     path: ../packages/ciesign_link
   crypto: ^3.0.8
