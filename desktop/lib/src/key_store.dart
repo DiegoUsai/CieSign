@@ -8,8 +8,12 @@ abstract class KeyStore {
 
 /// Portachiavi di sistema: Credential Manager su Windows, Portachiavi su
 /// macOS, libsecret su Linux.
+///
+/// Su macOS si usa il Portachiavi classico e non quello con protezione dei
+/// dati: quest'ultimo richiede l'entitlement keychain-access-groups e quindi
+/// un profilo di provisioning Apple, che un'app firmata ad hoc non ha.
 class SystemKeyStore implements KeyStore {
-  final _s = const FlutterSecureStorage();
+  final _s = const FlutterSecureStorage(mOptions: MacOsOptions(usesDataProtectionKeychain: false));
 
   @override
   Future<String?> read(String key) => _s.read(key: key);

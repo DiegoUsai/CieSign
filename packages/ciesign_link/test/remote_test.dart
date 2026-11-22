@@ -176,4 +176,20 @@ void main() {
     expect(await onSameNetwork(['[fe80::1]:47321'], localAddresses: ['192.168.1.33']), isFalse);
     expect(await onSameNetwork(const [], localAddresses: ['192.168.1.33']), isFalse);
   });
+
+  test('il QR code tiene solo indirizzi della rete locale', () {
+    expect(isLocalAddress('192.168.1.20:47321'), isTrue);
+    expect(isLocalAddress('10.0.0.5:47321'), isTrue);
+    expect(isLocalAddress('172.20.1.1:47321'), isTrue);
+    expect(isLocalAddress('[fe80::1]:47321'), isTrue);
+    expect(isLocalAddress('[fd12::5]:47321'), isTrue);
+    expect(isLocalAddress('172.32.1.1:47321'), isFalse);
+    expect(isLocalAddress('8.8.8.8:47321'), isFalse);
+    expect(isLocalAddress('[2001:db8::1]:47321'), isFalse);
+    expect(isLocalAddress('attaccante.example:47321'), isFalse);
+    final o = PairingOffer.parse(
+      'ciesign://pair?v=1&id=x&n=PC&k=${'A' * 43}&t=${'B' * 21}A&a=203.0.113.9:47321,192.168.1.20:47321',
+    );
+    expect(o.addresses, ['192.168.1.20:47321']);
+  });
 }

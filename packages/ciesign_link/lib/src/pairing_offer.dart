@@ -63,9 +63,27 @@ class PairingOffer {
       pcName: q['n'] ?? 'PC',
       pcPublicKey: k,
       token: t,
-      addresses: (q['a'] ?? '').split(',').where((s) => s.isNotEmpty).toList(),
+      addresses: (q['a'] ?? '').split(',').where(isLocalAddress).toList(),
       bluetooth: q['b'] == '1',
       remote: q['r'] == '1',
     );
   }
+}
+
+/// Vero per un indirizzo `host:porta` della rete locale: IPv4 privati
+/// (RFC 1918), link-local e loopback, IPv6 locali (fc00::/7) e link-local
+/// (fe80::/10). Il QR code serve solo per la rete di casa: un indirizzo
+/// pubblico, per esempio in un QR code preparato da un attaccante, si scarta.
+/// Via internet si passa solo dalle stanze del signaling (r=1).
+bool isLocalAddress(String hostPort) {
+  final i = hostPort.lastIndexOf(':');
+  if (i <= 0) return false;
+  final host = hostPort.substring(0, i).replaceAll('[', '').replaceAll(']', '').toLowerCase();
+  final v4 = host.split('.').map(int.tryParse).toList();
+  if (v4.length == 4 && v4.every((n) => n != null && n >= 0 && n <= 255)) {
+    final a = v4[0]!, b = v4[1]!;
+    return a == 10 || a == 127 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168) || (a == 169 && b == 254);
+  }
+  if (!host.contains(':')) return false;
+  return host == '::1' || host.startsWith('fc') || host.startsWith('fd') || RegExp(r'^fe[89ab]').hasMatch(host);
 }

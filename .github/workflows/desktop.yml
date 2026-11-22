@@ -130,9 +130,25 @@ jobs:
         run: |
           flutter pub get
           flutter build macos --release --dart-define=CIESIGN_SIGNALING_URL=${{ vars.CIESIGN_SIGNALING_URL }} --dart-define=CIESIGN_FIREBASE_API_KEY=${{ vars.CIESIGN_FIREBASE_API_KEY }}
-      - name: Archivio dell'app
-        run: ditto -c -k --keepParent "desktop/build/macos/Build/Products/Release/cie_sign_desktop.app" cie-sign-macos.zip
+      - name: Pacchetto .dmg non firmato
+        # Firma ad hoc (senza Apple Developer ID): l'app non è autenticata da
+        # Apple e al primo avvio va aperta con "Apri comunque" (vedi
+        # desktop/macos/LEGGIMI.md, copiato nel .dmg).
+        run: |
+          set -euo pipefail
+          src="desktop/build/macos/Build/Products/Release/cie_sign_desktop.app"
+          stage="$RUNNER_TEMP/dmg"
+          mkdir -p "$stage"
+          ditto "$src" "$stage/CIE Sign.app"
+          codesign --verify --deep --strict "$stage/CIE Sign.app"
+          lipo -archs "$stage/CIE Sign.app/Contents/MacOS/cie_sign_desktop"
+          ln -s /Applications "$stage/Applicazioni"
+          cp desktop/macos/LEGGIMI.md "$stage/LEGGIMI - come aprire CIE Sign.md"
+          version=$(grep '^version:' desktop/pubspec.yaml | sed 's/version: *//; s/+.*//')
+          hdiutil create -volname "CIE Sign" -srcfolder "$stage" -fs HFS+ -format UDZO -ov "cie-sign-macos-$version.dmg"
+          echo "DMG=cie-sign-macos-$version.dmg" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v4
         with:
           name: cie-sign-macos
-          path: cie-sign-macos.zip
+          path: ${{ env.DMG }}
+          compression-level: 0

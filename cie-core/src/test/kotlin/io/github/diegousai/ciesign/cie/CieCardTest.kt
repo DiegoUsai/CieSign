@@ -42,6 +42,27 @@ class CieCardTest {
     }
 
     @Test
+    fun `calcola l'impronta dal certificato letto nella stessa sessione`() {
+        val card = SimulatedCie()
+        var seen: ByteArray? = null
+        val result = CieSigner.runOn(CieCard(card, {}, card.caPrivateExponent), "12345678".toCharArray(), { cert ->
+            seen = cert
+            CieSigner.sha256(cert + "attributi".toByteArray())
+        }, {})
+        assertContentEquals(card.certificateDer, seen)
+        assertContentEquals(CieSigner.sha256(card.certificateDer + "attributi".toByteArray()), result.digest)
+        assertEquals(true, result.signatureValid)
+    }
+
+    @Test
+    fun `senza impronta si ferma alla lettura del certificato`() {
+        val card = SimulatedCie()
+        val result = CieSigner.runOn(CieCard(card, {}, card.caPrivateExponent), "12345678".toCharArray(), { null }, {})
+        assertContentEquals(card.certificateDer, result.certificate)
+        assertEquals(null, result.signature)
+    }
+
+    @Test
     fun `una firma alterata non viene accettata`() {
         val card = SimulatedCie()
         val digest = CieSigner.sha256("documento".toByteArray())

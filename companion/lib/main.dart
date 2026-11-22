@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:ciesign_link/ciesign_link.dart';
 import 'package:crypto/crypto.dart';
@@ -9,8 +10,10 @@ import 'package:path_provider/path_provider.dart';
 
 import 'cie_bridge.dart';
 import 'link_service.dart';
+import 'local_sign.dart';
 import 'pair_page.dart';
 import 'request_page.dart';
+import 'sign_file_page.dart';
 
 void main() => runApp(const CieSignCompanionApp());
 
@@ -53,6 +56,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Timer? _retry;
   bool _requestOpen = false;
   bool _foreground = true;
+  SignedStore? _store;
+  List<File> _signed = const [];
 
   @override
   void initState() {
@@ -74,6 +79,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _open() async {
     try {
       final dir = await getApplicationSupportDirectory();
+      _store = SignedStore(Directory('${(await getApplicationDocumentsDirectory()).path}/firmati'));
+      _refreshSigned();
       final link = await PhoneLink.open(dir, deviceName: await _bridge.deviceName());
       link.addListener(() {
         if (mounted) setState(() {});
@@ -98,10 +105,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_foreground) _link?.connect();
   }
 
-  /// QR code inquadrato con la fotocamera del telefono invece che dall'app.
+  /// Link ciesign://pair arrivato da fuori dell'app. Il filtro non è più
+  /// BROWSABLE, quindi pagine web, email e SMS non lo aprono; resta comunque
+  /// una conferma esplicita, perché un'altra app può inviarlo.
   void _onLink(String uri) {
     try {
-      _pair(PairingOffer.parse(uri));
+      _pair(PairingOffer.parse(uri), fromLink: true);
     } on FormatException catch (e) {
       _snack('QR code non valido: ${e.message}');
     }
@@ -112,9 +121,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (offer != null) await _pair(offer);
   }
 
-  Future<void> _pair(PairingOffer offer) async {
+  Future<void> _pair(PairingOffer offer, {bool fromLink = false}) async {
     final link = _link;
     if (link == null) return;
+    final current = link.pc?.device.name;
+    if (fromLink || current != null) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Abbinare un nuovo PC?'),
+          content: Text(
+            '${fromLink ? 'Procedi solo se hai appena inquadrato il QR code sullo schermo del tuo PC. ' : ''}'
+            '${current != null ? 'Il PC abbinato ora, $current, verrà sostituito da ${offer.pcName}.' : 'Il PC si presenta come ${offer.pcName}.'}',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Annulla')),
+            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Abbina')),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+    }
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => PairPage(link: link, offer: offer)),
     );
@@ -149,6 +176,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
     _requestOpen = false;
     if (mounted) setState(() {});
+  }
+
+  Future<void> _refreshSigned() async {
+    final list = await _store?.list() ?? const <File>[];
+    if (mounted) setState(() => _signed = list);
+  }
+
+  Future<void> _signFile() async {
+    final store = _store;
+    if (store == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SignFilePage(bridge: _bridge, store: store, onCertificate: _link?.rememberCertificate),
+      ),
+    );
+    await _refreshSigned();
+  }
+
+  void _openSigned(File f) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(f.uri.pathSegments.last, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 16),
+              SignedFileActions(file: f),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _snack(String text) {
@@ -192,6 +255,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const SizedBox(height: 16),
             Card(
               child: ListTile(
+                leading: const Icon(Icons.draw_outlined),
+                title: const Text('Firma un documento'),
+                subtitle: const Text('Scegli un file dal telefono e firmalo con la CIE, senza PC'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _store == null ? null : _signFile,
+              ),
+            ),
+            if (_signed.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text('Firmati sul telefono', style: theme.textTheme.titleSmall),
+              for (final f in _signed.take(10))
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(f.path.toLowerCase().endsWith('.pdf') ? Icons.picture_as_pdf : Icons.description),
+                  title: Text(f.uri.pathSegments.last, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(_when(f.lastModifiedSync())),
+                  onTap: () => _openSigned(f),
+                ),
+            ],
+            const SizedBox(height: 16),
+            Card(
+              child: ListTile(
                 leading: const Icon(Icons.badge),
                 title: const Text('Prova la carta'),
                 subtitle: Text(
@@ -220,8 +305,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         Icons.qr_code_scanner,
         null,
         'Nessun PC abbinato',
-        'Sul PC apri CIE Sign, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto '
-            'oppure con la fotocamera del telefono.${link.remoteEnabled ? '' : ' Telefono e PC devono essere sulla stessa Wi-Fi.'}',
+        'Sul PC apri CIE Sign, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto'
+            '.${link.remoteEnabled ? '' : ' Telefono e PC devono essere sulla stessa Wi-Fi.'}',
       ),
       LinkState.connected => (
         Icons.link,
@@ -292,6 +377,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+String _when(DateTime d) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
 }
 
 /// Schermata del prototipo: legge il certificato dalla CIE e firma un'impronta di prova.

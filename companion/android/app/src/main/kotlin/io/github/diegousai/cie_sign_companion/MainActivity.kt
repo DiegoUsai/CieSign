@@ -24,13 +24,16 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
  * Attività principale. Espone a Flutter il canale "ciesign/cie" con questi metodi:
  * - nfcStatus: indica se l'NFC è presente e attivo;
  * - start: attende la CIE, verifica il PIN, legge il certificato e, se richiesto,
- *   firma l'impronta SHA-256 ricevuta;
+ *   firma l'impronta SHA-256 ricevuta; con prepare=true l'impronta la calcola
+ *   Flutter (metodo "prepare") dal certificato appena letto, nella stessa sessione;
  * - cancel: interrompe l'attesa della carta;
  * - initialLink: collegamento ciesign://pair?... con cui l'app è stata aperta;
  * - deviceName: produttore e modello del telefono, mostrati sul PC.
@@ -45,7 +48,12 @@ class MainActivity : FlutterActivity() {
     private var pending: PendingRequest? = null
     private var initialLink: String? = null
 
-    private class PendingRequest(val pin: CharArray, val digest: ByteArray?, val result: MethodChannel.Result) {
+    private class PendingRequest(
+        val pin: CharArray,
+        val digest: ByteArray?,
+        val prepare: Boolean,
+        val result: MethodChannel.Result,
+    ) {
         /** Diventa vero alla prima carta rilevata, per ignorare rilevamenti successivi. */
         val started = java.util.concurrent.atomic.AtomicBoolean(false)
     }
@@ -127,7 +135,8 @@ class MainActivity : FlutterActivity() {
             result.error("BAD_DIGEST", "L'impronta deve essere SHA-256 (32 byte)", null)
             return
         }
-        pending = PendingRequest(pin, digest, result)
+        val prepare = call.argument<Boolean>("prepare") == true
+        pending = PendingRequest(pin, digest, prepare, result)
         status("Avvicina la CIE al retro del telefono e tienila ferma")
         val extras = Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 1000) }
         adapter.enableReaderMode(
@@ -165,7 +174,12 @@ class MainActivity : FlutterActivity() {
                         .append("  < SW=").append(sw).append(" (").append(resp.size - 2).append(" byte)\n")
                     resp
                 }
-                val session = CieSigner.run(transport, request.pin, request.digest) { trace.append("# ").append(it).append('\n'); status(it) }
+                val log: (String) -> Unit = { trace.append("# ").append(it).append('\n'); status(it) }
+                val session = if (request.prepare) {
+                    CieSigner.runWithCertificate(transport, request.pin, { cert -> askDigest(request, cert) }, log)
+                } else {
+                    CieSigner.run(transport, request.pin, request.digest, log)
+                }
                 val cert = CieSigner.parseCertificate(session.certificate)
                 val fmt = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.ITALY)
                 val payload = mapOf(
@@ -190,6 +204,8 @@ class MainActivity : FlutterActivity() {
                 finish(request) { it.error("BAD_PIN", e.message, trace.toString()) }
             } catch (e: NotACieException) {
                 finish(request) { it.error("NOT_CIE", e.message, trace.toString()) }
+            } catch (e: PrepareException) {
+                finish(request) { it.error("PREPARE_FAILED", e.message, null) }
             } catch (e: IOException) {
                 finish(request) { it.error("TAG_LOST", "Collegamento con la carta interrotto: tienila ferma e riprova", "$trace${e.message}") }
             } catch (e: CieException) {
@@ -200,6 +216,47 @@ class MainActivity : FlutterActivity() {
                 try { isoDep.close() } catch (_: IOException) { }
             }
         }
+    }
+
+    private class PrepareException(message: String) : Exception(message)
+
+    /**
+     * Chiede a Flutter l'impronta da firmare per il certificato appena letto, mentre la
+     * carta resta nel campo NFC. Gira sul thread del lettore, quindi può attendere.
+     */
+    private fun askDigest(request: PendingRequest, cert: ByteArray): ByteArray {
+        val latch = CountDownLatch(1)
+        var digest: ByteArray? = null
+        var error: String? = null
+        status("Preparazione del documento, non allontanare la carta")
+        main.post {
+            if (pending !== request) {
+                error = "Operazione annullata"
+                latch.countDown()
+                return@post
+            }
+            channel.invokeMethod("prepare", cert, object : MethodChannel.Result {
+                override fun success(result: Any?) {
+                    digest = result as? ByteArray
+                    latch.countDown()
+                }
+
+                override fun error(code: String, message: String?, details: Any?) {
+                    error = message ?: code
+                    latch.countDown()
+                }
+
+                override fun notImplemented() {
+                    error = "Preparazione non disponibile"
+                    latch.countDown()
+                }
+            })
+        }
+        if (!latch.await(60, TimeUnit.SECONDS)) throw PrepareException("Preparazione del documento troppo lenta")
+        error?.let { throw PrepareException(it) }
+        val d = digest ?: throw PrepareException("Impronta non ricevuta")
+        if (d.size != 32) throw PrepareException("L'impronta deve essere SHA-256 (32 byte)")
+        return d
     }
 
     private fun finish(request: PendingRequest, reply: (MethodChannel.Result) -> Unit) {

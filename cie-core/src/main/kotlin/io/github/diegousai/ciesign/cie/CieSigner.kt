@@ -38,13 +38,31 @@ object CieSigner {
      * Apre il canale sicuro, verifica il PIN, legge il certificato e, se [digest] non è nullo,
      * fa firmare l'impronta alla carta e verifica la firma ottenuta.
      */
-    fun run(transport: ApduTransport, pin: CharArray, digest: ByteArray?, log: (String) -> Unit = {}): CieSessionResult {
-        val card = CieCard(transport, log)
+    fun run(transport: ApduTransport, pin: CharArray, digest: ByteArray?, log: (String) -> Unit = {}): CieSessionResult =
+        runWithCertificate(transport, pin, { digest }, log)
+
+    /**
+     * Come [run], ma l'impronta da firmare è calcolata da [digestFor] a partire dal
+     * certificato appena letto, nella stessa sessione con la carta. Serve quando il
+     * telefono firma da solo un documento: gli attributi firmati contengono il
+     * certificato, quindi l'impronta si conosce solo dopo averlo letto, e così basta
+     * avvicinare la carta una volta sola. Se [digestFor] restituisce null la sessione
+     * si chiude dopo la lettura del certificato.
+     */
+    fun runWithCertificate(
+        transport: ApduTransport,
+        pin: CharArray,
+        digestFor: (certificate: ByteArray) -> ByteArray?,
+        log: (String) -> Unit = {},
+    ): CieSessionResult = runOn(CieCard(transport, log), pin, digestFor, log)
+
+    internal fun runOn(card: CieCard, pin: CharArray, digestFor: (ByteArray) -> ByteArray?, log: (String) -> Unit): CieSessionResult {
         card.openSecureChannel()
         log("Verifica del PIN")
         card.verifyPin(pin)
         val cert = card.readCertificate()
-        if (digest == null) return CieSessionResult(cert, null, null, null)
+        val digest = digestFor(cert) ?: return CieSessionResult(cert, null, null, null)
+        require(digest.size == 32) { "L'impronta SHA-256 deve essere di 32 byte" }
         val signature = card.signDigestInfo(digestInfoSha256(digest))
         val valid = verifyPkcs1Sha256(cert, digest, signature)
         log(if (valid) "Firma verificata con il certificato" else "La firma NON corrisponde al certificato")
