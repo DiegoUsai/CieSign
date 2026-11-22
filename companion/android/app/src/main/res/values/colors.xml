@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Rosso del marchio Firmami: fondo mostrato da Android prima dello splash animato. -->
+    <color name="firmami_red">#D81E3F</color>
+</resources>

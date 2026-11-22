@@ -1,0 +1,16 @@
+name: firmami_brand
+description: Marchio di Firmami (colori, logo telefono-penna e splash screen animato), condiviso tra app desktop e app per telefono.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

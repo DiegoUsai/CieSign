@@ -130,7 +130,7 @@ class Rendezvous {
       final deadline = DateTime.now().add(timeout);
       final a = await answer.future.timeout(
         timeout,
-        onTimeout: () => throw const LinkException('Il PC non risponde via internet: è acceso con CIE Sign aperta?'),
+        onTimeout: () => throw const LinkException('Il PC non risponde via internet: è acceso con Firmami aperta?'),
       );
       await peer.acceptAnswer(a);
       final ch = await peer.channel.timeout(

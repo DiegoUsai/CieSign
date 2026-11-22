@@ -36,6 +36,12 @@ jobs:
           dart pub get
           dart analyze --fatal-infos
           dart test
+      - name: Marchio Firmami (logo e splash)
+        working-directory: packages/firmami_brand
+        run: |
+          flutter pub get
+          flutter analyze --fatal-infos
+          flutter test
       - name: Collegamento WebRTC (ciesign_webrtc)
         working-directory: packages/ciesign_webrtc
         run: |
