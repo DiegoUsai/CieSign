@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cie_sign_desktop/main.dart';
 import 'package:cie_sign_desktop/src/sign_workflow.dart';
 import 'package:cie_sign_desktop/src/signers.dart';
+import 'package:cie_sign_desktop/src/workspace.dart';
 import 'package:ciesign_ades/ciesign_ades.dart';
 import 'package:ciesign_link/ciesign_link.dart';
 import 'package:flutter/widgets.dart' show Size;
@@ -13,14 +14,35 @@ void main() {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(const CieSignApp(startLink: false));
-    expect(find.text('Trascina qui un documento'), findsOneWidget);
-    expect(find.text('Apri documento'), findsOneWidget);
+    final dir = (await tester.runAsync(() => Directory.systemTemp.createTemp('ws')))!;
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final ws = (await tester.runAsync(() => Workspace.open(dir: dir, network: false)))!;
+    await tester.pumpWidget(CieSignApp(startLink: false, workspace: ws));
+    await tester.pump();
+    expect(find.text('Trascina qui documenti o cartelle'), findsOneWidget);
+    expect(find.text('Apri documenti'), findsOneWidget);
+    expect(find.text('Apri una cartella'), findsOneWidget);
   });
 
   test('nomi dei file firmati', () {
     expect(SignWorkflow.signedName('contratto.pdf', SignFormat.pades), 'contratto-signed.pdf');
     expect(SignWorkflow.signedName('contratto.pdf', SignFormat.cades), 'contratto.pdf.p7m');
+  });
+
+  testWidgets('firma parallela su un .p7m esistente', (tester) async {
+    await tester.runAsync(() async {
+      final pdf = File('test/resources/semplice.pdf').readAsBytesSync();
+      final wf = SignWorkflow(TestSigner());
+      final first = await wf.run(OpenedDocument('C:\\Doc\\a.pdf', pdf), SignFormat.cades);
+      final p7m = OpenedDocument('C:\\Doc\\a.pdf.p7m', first.bytes);
+      expect(SignWorkflow.isCosign(p7m, SignFormat.cades), isTrue);
+      final second = await wf.run(p7m, SignFormat.cades);
+      expect(second.suggestedName, 'a.pdf.p7m');
+      final f = CadesFile.open(second.bytes);
+      expect(f.content, pdf);
+      expect(f.reports, hasLength(2));
+      expect(f.reports.every((r) => r.isIntact), isTrue);
+    });
   });
 
   testWidgets('firma di prova PAdES visibile e CAdES', (tester) async {

@@ -2,295 +2,240 @@ import 'package:ciesign_ades/ciesign_ades.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
-String formatDate(DateTime? d, {bool seconds = false}) {
-  if (d == null) return 'non indicata';
-  final l = d.toLocal();
-  String two(int v) => v.toString().padLeft(2, '0');
-  final s = seconds ? ':${two(l.second)}' : '';
-  return '${two(l.day)}/${two(l.month)}/${l.year} ${two(l.hour)}:${two(l.minute)}$s';
-}
+export 'package:ciesign_ades/ciesign_ades.dart'
+    show Outcome, ReportLine, formatDate, overallText, verificationLimits, verificationReportText;
 
-String integrityText(SignatureIntegrity i) => switch (i) {
-  SignatureIntegrity.valid => 'Firma integra',
-  SignatureIntegrity.contentModified => 'Documento modificato dopo la firma',
-  SignatureIntegrity.signatureInvalid => 'Firma non valida',
-  SignatureIntegrity.certificateMissing => 'Certificato del firmatario assente',
-  SignatureIntegrity.unsupportedAlgorithm => 'Algoritmo non supportato',
+Color outcomeColor(Outcome? o) => switch (o) {
+  Outcome.valid => Colors.green.shade700,
+  Outcome.warning => Colors.orange.shade800,
+  Outcome.invalid => Colors.red.shade700,
+  null => Colors.grey.shade600,
 };
 
-String _hex(List<int> b, {String sep = ':'}) =>
-    b.map((v) => v.toRadixString(16).padLeft(2, '0').toUpperCase()).join(sep);
+IconData outcomeIcon(Outcome? o) => switch (o) {
+  Outcome.valid => Icons.verified_outlined,
+  Outcome.warning => Icons.warning_amber_outlined,
+  Outcome.invalid => Icons.gpp_bad_outlined,
+  null => Icons.help_outline,
+};
 
-/// Codice fiscale dal serialNumber del soggetto ("TINIT-RSSMRA80A01H501U").
-String? fiscalCode(Certificate c) {
-  final s = c.subject.get(Oids.serialNumber);
-  if (s == null) return null;
-  return s.startsWith('TINIT-') ? s.substring(6) : s;
-}
-
-String issuerName(Certificate c) =>
-    c.issuer.get(Oids.organization) ?? c.issuer.get(Oids.commonName) ?? c.issuer.toString();
-
-/// Testo breve sulla marca temporale, per la scheda e il rapporto.
-String timestampText(SignatureReport r) {
-  final t = r.timestamp;
-  if (t == null) return r.hasTimestamp ? 'Marca temporale presente ma non leggibile' : 'Nessuna marca temporale';
-  final who = t.tsaName == null ? '' : ' da ${t.tsaName}';
-  final esito = t.isValid
-      ? 'integra'
-      : !t.imprintMatches
-      ? 'non corrisponde ai dati marcati'
-      : 'non integra (${integrityText(t.integrity).toLowerCase()})';
-  return 'Marca temporale del ${formatDate(t.genTime, seconds: true)}$who, $esito';
-}
-
-/// Una riga del dettaglio: etichetta e valore.
-typedef ReportLine = (String label, String value);
-
-/// Esito di una firma o marca: valida, da controllare o non valida.
-enum Outcome { valid, warning, invalid }
-
-Outcome outcomeOf(SignatureReport r) {
-  if (!r.isIntact) return Outcome.invalid;
-  final time = r.certificateTime;
-  if (r.isDocumentTimestamp) return time == CertificateTime.valid ? Outcome.valid : Outcome.warning;
-  if (time == CertificateTime.expired || time == CertificateTime.notYetValid) return Outcome.invalid;
-  final chain = r.chain?.status;
-  if (chain == ChainStatus.brokenChain || chain == ChainStatus.cieExpired) return Outcome.invalid;
-  return Outcome.valid;
-}
-
-/// Validità del certificato in una frase.
-String certificateTimeText(SignatureReport r) {
-  final c = r.certificate;
-  if (c == null) return 'Certificato assente';
-  final scad = formatDate(c.notAfter);
-  return switch (r.certificateTime) {
-    CertificateTime.valid => 'Certificato valido fino al $scad',
-    CertificateTime.validAtTimestamp =>
-      'Certificato scaduto il $scad, ma la marca temporale prova che la firma è stata apposta prima',
-    CertificateTime.expired =>
-      r.isDocumentTimestamp
-          ? 'Certificato della TSA scaduto il $scad'
-          : 'Certificato scaduto il $scad: nessuna marca temporale prova che la firma sia stata apposta prima della scadenza',
-    CertificateTime.notYetValid =>
-      'Certificato non ancora valido alla data della firma (valido dal ${formatDate(c.notBefore)})',
-    CertificateTime.unknown => 'Certificato assente',
-  };
-}
-
-/// Valore della firma secondo la catena. Per i certificati di altri
-/// certificatori (per esempio una firma digitale InfoCert o Aruba) l'app non
-/// controlla ancora l'elenco europeo dei prestatori qualificati e lo dice.
-String chainText(SignatureReport r) {
-  final chain = r.chain!;
-  if (chain.status == ChainStatus.unknownIssuer && r.certificate != null) {
-    return 'Certificato di ${issuerName(r.certificate!)}, non CIE: qualificazione non ancora verificata dall\'app';
-  }
-  return chain.label;
-}
-
-/// Prima riga della scheda: l'esito in poche parole.
-String headline(SignatureReport r) {
-  if (!r.isIntact) return integrityText(r.integrity);
-  if (r.isDocumentTimestamp) return 'Marca temporale integra';
-  return switch (r.certificateTime) {
-    CertificateTime.expired => 'Non valida: certificato scaduto il ${formatDate(r.certificate!.notAfter)}',
-    CertificateTime.notYetValid => 'Non valida: certificato non ancora valido',
-    _ when r.chain?.status == ChainStatus.brokenChain => 'Non valida: catena di certificazione non valida',
-    _ when r.chain?.status == ChainStatus.cieExpired => 'Non valida: certificato CIE scaduto alla data della firma',
-    _ => 'Firma integra, certificato valido',
-  };
-}
-
-/// Dettaglio di una firma, usato sia nel dialogo sia nel rapporto copiabile.
-List<ReportLine> reportLines(SignatureReport r, {required bool pades}) {
-  final c = r.certificate;
-  return [
-    ('Esito', headline(r)),
-    ('Integrità', r.isDocumentTimestamp && r.isIntact ? 'Marca temporale integra' : integrityText(r.integrity)),
-    ('Validità del certificato', certificateTimeText(r)),
-    if (r.chain != null) ...[
-      ('Valore della firma', chainText(r)),
-      if (r.chain!.note != null) ('Nota', r.chain!.note!),
-      if (r.chain!.path.length > 1)
-        (
-          'Catena di certificazione',
-          r.chain!.path.map((c) => c.subject.get(Oids.commonName) ?? c.holderName).join(' → '),
-        ),
-    ],
-    (
-      'Tipo',
-      r.isDocumentTimestamp
-          ? 'Marca temporale del documento (PAdES, DocTimeStamp)'
-          : pades
-          ? 'Firma PAdES${r.subFilter == null ? '' : ' (${r.subFilter})'}'
-          : 'Firma CAdES (.p7m)',
-    ),
-    if (c != null) ...[
-      (r.isDocumentTimestamp ? 'Autorità di marcatura' : 'Firmatario', c.holderName),
-      if (!r.isDocumentTimestamp && fiscalCode(c) != null) ('Codice fiscale', fiscalCode(c)!),
-      ('Emittente del certificato', issuerName(c)),
-      ('Certificato valido', 'dal ${formatDate(c.notBefore)} al ${formatDate(c.notAfter)}'),
-      ('Numero di serie', c.serialNumber.toRadixString(16).toUpperCase()),
-      ('Impronta SHA-256', _hex(c.sha256Fingerprint)),
-    ] else
-      ('Firmatario', 'certificato non presente nella firma'),
-    if (!r.isDocumentTimestamp) ...[
-      (
-        'Data dichiarata',
-        '${formatDate(r.signingTime, seconds: true)} (orologio del PC di chi firma, non certificata)',
-      ),
-      ('Marca temporale', timestampText(r)),
-    ] else
-      ('Data certificata', formatDate(r.signingTime, seconds: true)),
-    if (r.coversWholeDocument != null)
-      (
-        'Copertura',
-        r.coversWholeDocument!
-            ? 'Copre l\'intero documento'
-            : 'Il documento ha aggiunte successive a questa firma (per esempio altre firme o marche)',
-      ),
-    if (r.fieldName != null && r.fieldName!.isNotEmpty) ('Campo firma', r.fieldName!),
-  ];
-}
-
-const verificationLimits =
-    'Questa versione verifica l\'integrità delle firme e delle marche temporali, la scadenza dei '
-    'certificati e riconosce quelli della CIE emessi dal Ministero dell\'Interno. Non controlla ancora '
-    'la revoca dei certificati (OCSP, CRL) né l\'elenco europeo dei prestatori qualificati.';
-
-/// Rapporto di verifica in testo semplice, da copiare negli appunti.
-String verificationReportText(String documentName, List<SignatureReport> reports, {required bool pades}) {
-  final b = StringBuffer()
-    ..writeln('Rapporto di verifica CIE Sign')
-    ..writeln('Documento: $documentName')
-    ..writeln('Verificato il: ${formatDate(DateTime.now(), seconds: true)}')
-    ..writeln('Esito: ${overallText(reports)}')
-    ..writeln();
-  for (var i = 0; i < reports.length; i++) {
-    final r = reports[i];
-    b.writeln(r.isDocumentTimestamp ? '${i + 1}. Marca temporale del documento' : '${i + 1}. Firma');
-    for (final (l, v) in reportLines(r, pades: pades)) {
-      b.writeln('   $l: $v');
-    }
-    b.writeln();
-  }
-  b.writeln(verificationLimits);
-  return b.toString();
-}
-
-/// Esito complessivo in una frase.
-String overallText(List<SignatureReport> reports) {
-  if (reports.isEmpty) return 'Il documento non contiene firme';
-  final firme = reports.where((r) => !r.isDocumentTimestamp).length;
-  final marche = reports.length - firme;
-  final invalid = reports.where((r) => outcomeOf(r) == Outcome.invalid).length;
-  final warning = reports.where((r) => outcomeOf(r) == Outcome.warning).length;
-  String n(int k, String s, String p) => k == 1 ? '1 $s' : '$k $p';
-  final parts = [
-    if (firme > 0) n(firme, 'firma', 'firme'),
-    if (marche > 0) n(marche, 'marca temporale del documento', 'marche temporali del documento'),
-  ].join(' e ');
-  if (invalid > 0) return '$parts: ${n(invalid, 'non è valida', 'non sono valide')}';
-  if (warning > 0) return '$parts: ${n(warning, 'da controllare', 'da controllare')}';
-  return reports.length == 1 ? '$parts, valida' : '$parts, tutte valide';
-}
-
-/// Sezione di verifica (UC5): esito complessivo, una scheda per firma con il
-/// dettaglio a richiesta e il rapporto copiabile.
+/// Verifica di un documento, come in Aruba Sign ma con le priorità chieste:
+/// prima l'esito complessivo, poi una riga per firma con VALIDA o NON VALIDA
+/// e il motivo; controlli, certificato e proprietà solo aprendo la firma.
 class VerificationPanel extends StatelessWidget {
-  const VerificationPanel({super.key, required this.reports, required this.documentName, required this.pades});
+  const VerificationPanel({
+    super.key,
+    required this.evaluations,
+    required this.documentName,
+    this.reference,
+    this.checkingRevocation = false,
+  });
 
-  final List<SignatureReport> reports;
+  final List<SignatureEvaluation> evaluations;
   final String documentName;
-  final bool pades;
+
+  /// Data scelta per la verifica; nulla per "adesso".
+  final DateTime? reference;
+  final bool checkingRevocation;
 
   @override
   Widget build(BuildContext context) {
     final t = Theme.of(context).textTheme;
     final scheme = Theme.of(context).colorScheme;
-    final outcomes = reports.map(outcomeOf).toSet();
-    final worst = outcomes.contains(Outcome.invalid)
-        ? Outcome.invalid
-        : outcomes.contains(Outcome.warning)
-        ? Outcome.warning
-        : Outcome.valid;
-    final color = reports.isEmpty ? scheme.surfaceContainerHighest : _color(worst).withValues(alpha: 0.15);
+    final worst = evaluations.isEmpty ? null : worstOutcome(evaluations);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
           key: const ValueKey('esito-verifica'),
           padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(
+            color: evaluations.isEmpty ? scheme.surfaceContainerHighest : outcomeColor(worst).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
           child: Row(
             children: [
-              Icon(reports.isEmpty ? Icons.info_outline : _icon(worst), color: reports.isEmpty ? null : _color(worst)),
+              Icon(evaluations.isEmpty ? Icons.info_outline : outcomeIcon(worst), color: evaluations.isEmpty ? null : outcomeColor(worst)),
               const SizedBox(width: 12),
-              Expanded(child: Text(overallText(reports), style: t.titleSmall)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(overallText(evaluations), style: t.titleSmall),
+                    if (reference != null) Text('Verifica alla data ${formatDate(reference)}', style: t.bodySmall),
+                    if (checkingRevocation)
+                      Row(
+                        children: [
+                          const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5)),
+                          const SizedBox(width: 6),
+                          Text('Controllo della revoca in corso…', style: t.bodySmall),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
             ],
           ),
         ),
         const SizedBox(height: 8),
-        for (final r in reports)
-          Card(
-            margin: const EdgeInsets.only(bottom: 8),
-            child: ListTile(
-              leading: Icon(r.isDocumentTimestamp ? Icons.schedule : _icon(outcomeOf(r)), color: _color(outcomeOf(r))),
-              title: Text(
-                r.isDocumentTimestamp
-                    ? 'Marca temporale del documento'
-                    : r.certificate?.holderName ?? 'Firmatario sconosciuto',
-              ),
-              subtitle: Text(
-                [
-                  if (r.isDocumentTimestamp) ...[
-                    headline(r),
-                    if (r.certificateTime != CertificateTime.valid) certificateTimeText(r),
-                    'Data certificata: ${formatDate(r.signingTime)}',
-                    if (r.timestamp?.tsaName != null) 'Da ${r.timestamp!.tsaName}',
-                  ] else ...[
-                    headline(r),
-                    if (r.certificateTime == CertificateTime.validAtTimestamp) certificateTimeText(r),
-                    if (r.chain != null) chainText(r),
-                    'Data dichiarata: ${formatDate(r.signingTime)}',
-                    if (r.hasTimestamp) timestampText(r),
-                  ],
-                  if (r.coversWholeDocument == false) 'Il documento ha aggiunte successive',
-                ].join('\n'),
-              ),
-              isThreeLine: true,
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => showSignatureDetails(context, r, pades: pades),
-            ),
-          ),
-        if (reports.isNotEmpty)
+        for (final e in evaluations) SignatureTile(evaluation: e),
+        if (evaluations.isNotEmpty)
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
-              onPressed: () => showVerificationReport(context, documentName, reports, pades: pades),
-              icon: const Icon(Icons.summarize_outlined),
-              label: const Text('Rapporto di verifica'),
+              onPressed: () => showTextReport(context, documentName, evaluations, reference),
+              icon: const Icon(Icons.copy_all_outlined),
+              label: const Text('Rapporto in testo'),
             ),
           ),
-        Text(verificationLimits, style: t.bodySmall),
       ],
     );
   }
 }
 
-Color _color(Outcome o) => switch (o) {
-  Outcome.valid => Colors.green.shade700,
-  Outcome.warning => Colors.orange.shade800,
-  Outcome.invalid => Colors.red.shade700,
-};
+/// Una firma: riga sintetica sempre visibile, controlli e pulsanti a richiesta.
+class SignatureTile extends StatefulWidget {
+  const SignatureTile({super.key, required this.evaluation});
+  final SignatureEvaluation evaluation;
 
-IconData _icon(Outcome o) => switch (o) {
-  Outcome.valid => Icons.verified_outlined,
-  Outcome.warning => Icons.warning_amber_outlined,
-  Outcome.invalid => Icons.gpp_bad_outlined,
-};
+  @override
+  State<SignatureTile> createState() => _SignatureTileState();
+}
+
+class _SignatureTileState extends State<SignatureTile> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final e = widget.evaluation;
+    final r = e.report;
+    final t = Theme.of(context).textTheme;
+    final color = outcomeColor(e.outcome);
+    final kind = r.isDocumentTimestamp ? 'Marca temporale' : (e.pades ? 'Firma (PAdES)' : 'Firma (CAdES)');
+    final when = r.timestamp?.isValid == true ? r.timestamp!.genTime : r.signingTime;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(outcomeIcon(e.outcome), color: color, size: 22),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(r.isDocumentTimestamp ? kind : e.title, style: t.titleSmall),
+                        Text(
+                          [
+                            r.isDocumentTimestamp ? (r.timestamp?.tsaName ?? '') : '$kind, ${formatDate(when)}',
+                            ?e.where,
+                          ].join('\n'),
+                          style: t.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: color),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(e.verdict, style: t.labelSmall?.copyWith(color: color, fontWeight: FontWeight.bold)),
+                  ),
+                  Icon(_open ? Icons.expand_less : Icons.expand_more),
+                ],
+              ),
+            ),
+          ),
+          if (e.reason != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(44, 0, 12, 10),
+              child: Text(e.reason!, style: t.bodySmall?.copyWith(color: color)),
+            ),
+          if (_open) _details(context, e),
+        ],
+      ),
+    );
+  }
+
+  Widget _details(BuildContext context, SignatureEvaluation e) {
+    final r = e.report;
+    final t = Theme.of(context).textTheme;
+    Widget check(bool? ok, String text) => Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            ok == null ? Icons.remove_circle_outline : (ok ? Icons.check_circle_outline : Icons.cancel_outlined),
+            size: 18,
+            color: ok == null ? Colors.orange.shade800 : (ok ? Colors.green.shade700 : Colors.red.shade700),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: t.bodySmall)),
+        ],
+      ),
+    );
+    final time = e.certificateTime;
+    final certOk = time == CertificateTime.valid || time == CertificateTime.validAtTimestamp;
+    final rev = e.revocation.status;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(44, 0, 12, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          check(r.isIntact, r.isDocumentTimestamp && r.isIntact ? 'Marca temporale integra' : integrityText(r.integrity)),
+          check(r.isDocumentTimestamp && !certOk ? null : certOk, e.certificateTimeText),
+          if (!r.isDocumentTimestamp)
+            check(
+              switch (rev) {
+                RevocationStatus.good => true,
+                RevocationStatus.revoked => !e.isRevokedAtReference,
+                _ => null,
+              },
+              e.revocationText,
+            ),
+          if (r.chain != null)
+            check(
+              r.chain!.status == ChainStatus.brokenChain || r.chain!.status == ChainStatus.cieExpired ? false : true,
+              e.chainText,
+            ),
+          if (r.hasTimestamp && !r.isDocumentTimestamp) check(r.timestamp?.isValid, e.timestampText),
+          if (r.coversWholeDocument == false) check(null, 'Il documento ha aggiunte successive a questa firma'),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: () => showLines(context, 'Certificato', e.certificateLines),
+                child: const Text('Mostra certificato'),
+              ),
+              OutlinedButton(
+                onPressed: () => showLines(
+                  context,
+                  r.isDocumentTimestamp ? 'Proprietà della marca temporale' : 'Proprietà della firma',
+                  e.signatureLines,
+                ),
+                child: Text(r.isDocumentTimestamp ? 'Mostra proprietà marca' : 'Mostra proprietà firma'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 Widget _lines(BuildContext context, List<ReportLine> lines) {
   final t = Theme.of(context).textTheme;
@@ -312,27 +257,19 @@ Widget _lines(BuildContext context, List<ReportLine> lines) {
   );
 }
 
-Future<void> showSignatureDetails(BuildContext context, SignatureReport r, {required bool pades}) {
+Future<void> showLines(BuildContext context, String title, List<ReportLine> lines) {
   return showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
-      title: Text(r.isDocumentTimestamp ? 'Marca temporale del documento' : 'Dettaglio della firma'),
-      content: SizedBox(
-        width: 620,
-        child: SingleChildScrollView(child: _lines(context, reportLines(r, pades: pades))),
-      ),
+      title: Text(title),
+      content: SizedBox(width: 620, child: SingleChildScrollView(child: _lines(context, lines))),
       actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Chiudi'))],
     ),
   );
 }
 
-Future<void> showVerificationReport(
-  BuildContext context,
-  String documentName,
-  List<SignatureReport> reports, {
-  required bool pades,
-}) {
-  final text = verificationReportText(documentName, reports, pades: pades);
+Future<void> showTextReport(BuildContext context, String documentName, List<SignatureEvaluation> evals, DateTime? at) {
+  final text = verificationReportText(documentName, evals, at: at);
   return showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
@@ -348,8 +285,7 @@ Future<void> showVerificationReport(
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: text));
             if (context.mounted) {
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('Rapporto copiato negli appunti.')));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Rapporto copiato negli appunti.')));
             }
           },
           icon: const Icon(Icons.copy),

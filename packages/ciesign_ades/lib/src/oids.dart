@@ -9,6 +9,9 @@ class Oids {
   static const sha1 = '1.3.14.3.2.26';
   static const rsaEncryption = '1.2.840.113549.1.1.1';
   static const sha256WithRsa = '1.2.840.113549.1.1.11';
+  static const sha1WithRsa = '1.2.840.113549.1.1.5';
+  static const sha384WithRsa = '1.2.840.113549.1.1.12';
+  static const sha512WithRsa = '1.2.840.113549.1.1.13';
 
   static const contentType = '1.2.840.113549.1.9.3';
   static const messageDigest = '1.2.840.113549.1.9.4';
@@ -28,4 +31,12 @@ class Oids {
   static const keyUsage = '2.5.29.15';
   static const basicConstraints = '2.5.29.19';
   static const extKeyUsage = '2.5.29.37';
+  static const crlDistributionPoints = '2.5.29.31';
+  static const crlReason = '2.5.29.21';
+  static const authorityInfoAccess = '1.3.6.1.5.5.7.1.1';
+  static const adOcsp = '1.3.6.1.5.5.7.48.1';
+  static const adCaIssuers = '1.3.6.1.5.5.7.48.2';
+  static const kpOcspSigning = '1.3.6.1.5.5.7.3.9';
+  static const ocspBasic = '1.3.6.1.5.5.7.48.1.1';
+  static const ocspNonce = '1.3.6.1.5.5.7.48.1.2';
 }

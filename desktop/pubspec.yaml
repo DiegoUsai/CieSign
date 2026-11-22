@@ -44,6 +44,8 @@ dependencies:
     path: ../packages/ciesign_ades
   ciesign_link:
     path: ../packages/ciesign_link
+  ciesign_docset:
+    path: ../packages/ciesign_docset
   crypto: ^3.0.8
   bonsoir: ^7.1.5
   flutter_secure_storage: ^11.2.0

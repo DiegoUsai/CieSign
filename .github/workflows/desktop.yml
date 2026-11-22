@@ -36,6 +36,12 @@ jobs:
           dart pub get
           dart analyze --fatal-infos
           dart test
+      - name: Fascicolo e rapporto (ciesign_docset)
+        working-directory: packages/ciesign_docset
+        run: |
+          dart pub get
+          dart analyze --fatal-infos
+          dart test
       - name: App desktop
         working-directory: desktop
         run: |
