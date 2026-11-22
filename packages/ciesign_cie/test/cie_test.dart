@@ -7,7 +7,7 @@ import 'package:ciesign_cie/src/tlv.dart';
 import 'package:crypto/crypto.dart' as c;
 import 'package:test/test.dart';
 
-import 'simulated_cie.dart';
+import 'package:ciesign_cie/testing.dart';
 
 Uint8List sha(String s) => Uint8List.fromList(c.sha256.convert(utf8.encode(s)).bytes);
 

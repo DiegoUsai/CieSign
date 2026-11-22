@@ -1,0 +1,46 @@
+# Build dell'app companion per iPhone su una macchina macOS di GitHub.
+# Senza account Apple Developer l'app non è firmata: la build serve a tenere la
+# versione iOS allineata a quella Android e a provarla nel simulatore. Per
+# installarla su un iPhone vero servono l'account e un profilo con il permesso NFC.
+name: App iOS
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  app-ios:
+    name: Build iOS (non firmata)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.50.1"
+          cache: true
+      - name: Analisi e test Dart
+        working-directory: companion
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+      - name: Build per iPhone (senza firma)
+        working-directory: companion
+        run: flutter build ios --release --no-codesign --build-number=${{ github.run_number }} --dart-define=BUILD_ID=build-${{ github.run_number }}
+      - name: Build per il simulatore
+        working-directory: companion
+        run: flutter build ios --simulator --debug --build-number=${{ github.run_number }} --dart-define=BUILD_ID=build-${{ github.run_number }}
+      - name: Pacchetti
+        working-directory: companion/build/ios
+        run: |
+          ditto -c -k --keepParent iphoneos/Runner.app cie-sign-ios-non-firmata.zip
+          ditto -c -k --keepParent iphonesimulator/Runner.app cie-sign-ios-simulatore.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cie-sign-companion-ios
+          path: |
+            companion/build/ios/cie-sign-ios-non-firmata.zip
+            companion/build/ios/cie-sign-ios-simulatore.zip
