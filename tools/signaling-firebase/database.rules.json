@@ -1,0 +1,20 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "v1": {
+      "ice": {
+        ".read": "auth != null"
+      },
+      "r": {
+        "$room": {
+          ".read": "auth != null && $room.matches(/^[A-Za-z0-9_-]{43}$/)",
+          ".write": "auth != null && $room.matches(/^[A-Za-z0-9_-]{43}$/)",
+          "$slot": {
+            ".validate": "($slot === 'o' || $slot === 'a') && newData.hasChildren(['c', 'ts']) && newData.child('c').isString() && newData.child('c').val().length <= 16384 && newData.child('ts').val() === now"
+          }
+        }
+      }
+    }
+  }
+}

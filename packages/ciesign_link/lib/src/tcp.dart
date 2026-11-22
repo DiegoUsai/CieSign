@@ -104,7 +104,7 @@ class PcLinkServer {
   Stream<Object> get errors => _errors.stream;
 
   /// Crea un nuovo QR code di abbinamento con gli indirizzi locali del PC.
-  Future<PairingOffer> newPairingOffer({bool bluetooth = false}) async {
+  Future<PairingOffer> newPairingOffer({bool bluetooth = false, bool remote = false}) async {
     final addresses = <String>[];
     for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4)) {
       for (final a in i.addresses) {
@@ -118,11 +118,16 @@ class PcLinkServer {
       token: randomBytes(16),
       addresses: addresses,
       bluetooth: bluetooth,
+      remote: remote,
     );
   }
 
-  Future<void> _onSocket(Socket s) async {
-    final ch = TcpFrameChannel(s);
+  Future<void> _onSocket(Socket s) => accept(TcpFrameChannel(s));
+
+  /// Stretta di mano su un canale arrivato da un altro trasporto, per
+  /// esempio WebRTC via internet: la sessione finisce in [sessions] come
+  /// quelle della rete locale.
+  Future<void> accept(FrameChannel ch) async {
     try {
       final c = await Handshake.acceptAsPc(ch, identity, lookup: lookup, pending: pendingOffer);
       _sessions.add(c);
@@ -158,4 +163,39 @@ class PhoneLinkClient {
     }
     throw LinkException('PC non raggiungibile sulla rete locale ($last)');
   }
+}
+
+/// Vero se almeno uno degli indirizzi del PC (dal QR code) sta nella stessa
+/// sottorete /24 di un'interfaccia del dispositivo. È un indizio, non una
+/// prova: serve a capire subito che telefono e PC sono su reti diverse e a
+/// proporre il collegamento via internet senza attendere i tempi di attesa.
+Future<bool> onSameNetwork(List<String> pcAddresses, {List<String>? localAddresses}) async {
+  final local =
+      localAddresses ??
+      [
+        for (final i in await NetworkInterface.list(type: InternetAddressType.IPv4))
+          for (final a in i.addresses)
+            if (!a.isLoopback) a.address,
+      ];
+  String? prefix(String ip) {
+    final p = ip.split('.');
+    return p.length == 4 ? p.take(3).join('.') : null;
+  }
+
+  final mine = {for (final a in local) ?prefix(a)};
+  for (final a in pcAddresses) {
+    final host = a.substring(0, a.lastIndexOf(':'));
+    if (mine.contains(prefix(host))) return true;
+  }
+  return false;
+}
+
+/// Il PC non risponde sulla rete locale e il collegamento via internet è
+/// disponibile ma spento: l'app chiede all'utente se attivarlo.
+class InternetSuggested extends LinkException {
+  const InternetSuggested(super.message, {required this.sameNetwork});
+
+  /// Falso se gli indirizzi del PC non sono nemmeno nella sottorete del
+  /// telefono.
+  final bool sameNetwork;
 }

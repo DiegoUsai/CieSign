@@ -4,6 +4,9 @@
     <uses-feature android:name="android.hardware.nfc" android:required="true" />
     <!-- Collegamento cifrato con il PC sulla Wi-Fi di casa. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- WebRTC (collegamento via internet) controlla lo stato della rete. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <application
         android:label="Firmami"
@@ -32,10 +35,11 @@
             </intent-filter>
             <!-- QR code di abbinamento mostrato dal PC (ciesign://pair?...), anche se
                  inquadrato con la fotocamera del telefono invece che dall'app. -->
+            <!-- Senza BROWSABLE: un link su una pagina web, un'email o un SMS non può
+                 avviare l'abbinamento (revisione di sicurezza, punto 2). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
-                <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="ciesign" android:host="pair"/>
             </intent-filter>
         </activity>

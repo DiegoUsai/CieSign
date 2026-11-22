@@ -60,7 +60,9 @@ jobs:
           key: android-debug-keystore-v1
       - name: Build APK debug
         working-directory: companion
-        run: flutter build apk --debug --build-number=${{ github.run_number }} --dart-define=BUILD_ID=build-${{ github.run_number }}
+        # Servizio di signaling per il collegamento via internet: variabili del
+        # repository (Settings > Secrets and variables > Actions > Variables).
+        run: flutter build apk --debug --build-number=${{ github.run_number }} --dart-define=BUILD_ID=build-${{ github.run_number }} --dart-define=CIESIGN_SIGNALING_URL=${{ vars.CIESIGN_SIGNALING_URL }} --dart-define=CIESIGN_FIREBASE_API_KEY=${{ vars.CIESIGN_FIREBASE_API_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: cie-sign-companion-debug-apk

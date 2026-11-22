@@ -159,8 +159,15 @@ class _HomePageState extends State<HomePage> {
             tooltip: 'Altre opzioni',
             onSelected: (v) {
               if (v == 'dev') setState(() => _dev = !_dev);
+              if (v == 'internet') _link?.setInternetEnabled(!_link!.internetEnabled);
             },
             itemBuilder: (context) => [
+              if (_link?.remoteAvailable ?? false)
+                CheckedPopupMenuItem(
+                  value: 'internet',
+                  checked: _link!.internetEnabled,
+                  child: const Text('Il telefono non è sulla stessa rete'),
+                ),
               CheckedPopupMenuItem(value: 'dev', checked: _dev, child: const Text('Modalità sviluppatore')),
             ],
           ),

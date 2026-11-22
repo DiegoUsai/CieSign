@@ -42,6 +42,11 @@ jobs:
           flutter pub get
           flutter analyze --fatal-infos
           flutter test
+      - name: Collegamento WebRTC (ciesign_webrtc)
+        working-directory: packages/ciesign_webrtc
+        run: |
+          flutter pub get
+          flutter analyze --fatal-infos
       - name: App desktop
         working-directory: desktop
         run: |
@@ -63,6 +68,37 @@ jobs:
           name: file-firmati-di-prova
           path: packages/ciesign_ades/build/test-output
 
+  signaling:
+    name: Servizi di signaling (Firebase e Cloudflare)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Dipendenze
+        run: |
+          (cd packages/ciesign_link && dart pub get)
+          (cd tools/signaling-worker && npm ci)
+          npm i -g firebase-tools@14
+      - name: Emulatori di Firebase con le regole vere
+        working-directory: tools/signaling-firebase
+        run: firebase emulators:exec --only auth,database --project demo-ciesign "cd ../../packages/ciesign_link && dart test -t servizio"
+      - name: Worker di Cloudflare in locale
+        run: |
+          (cd tools/signaling-worker && npx wrangler dev --port 8787 --ip 127.0.0.1 > ../../wrangler.log 2>&1 &)
+          for i in $(seq 1 60); do curl -s -o /dev/null http://127.0.0.1:8787/v1/ice.json && break; sleep 1; done
+          cd packages/ciesign_link && CIESIGN_TEST_SIGNALING_URL=http://127.0.0.1:8787 dart test -t servizio
+
   windows:
     name: Build Windows
     runs-on: windows-latest
@@ -78,7 +114,7 @@ jobs:
         working-directory: desktop
         run: |
           flutter pub get
-          flutter build windows --release
+          flutter build windows --release --dart-define=CIESIGN_SIGNALING_URL=${{ vars.CIESIGN_SIGNALING_URL }} --dart-define=CIESIGN_FIREBASE_API_KEY=${{ vars.CIESIGN_FIREBASE_API_KEY }}
       - uses: actions/upload-artifact@v4
         with:
           name: cie-sign-windows
@@ -99,7 +135,7 @@ jobs:
         working-directory: desktop
         run: |
           flutter pub get
-          flutter build macos --release
+          flutter build macos --release --dart-define=CIESIGN_SIGNALING_URL=${{ vars.CIESIGN_SIGNALING_URL }} --dart-define=CIESIGN_FIREBASE_API_KEY=${{ vars.CIESIGN_FIREBASE_API_KEY }}
       - name: Pacchetto .dmg non firmato
         # Firma ad hoc (senza Apple Developer ID): l'app non è autenticata da
         # Apple e al primo avvio va aperta con "Apri comunque" (vedi

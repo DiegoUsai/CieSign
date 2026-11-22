@@ -46,6 +46,8 @@ dependencies:
     path: ../packages/firmami_brand
   ciesign_link:
     path: ../packages/ciesign_link
+  ciesign_webrtc:
+    path: ../packages/ciesign_webrtc
   crypto: ^3.0.8
   bonsoir: ^7.1.5
   flutter_secure_storage: ^11.2.0

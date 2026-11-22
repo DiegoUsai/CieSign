@@ -99,6 +99,7 @@ class _PairPageState extends State<PairPage> {
   Future<void> _connect() async {
     setState(() {
       _error = null;
+      _suggest = null;
       _attempt = null;
     });
     try {
@@ -108,13 +109,31 @@ class _PairPageState extends State<PairPage> {
         return;
       }
       setState(() => _attempt = a);
+    } on InternetSuggested catch (e) {
+      if (mounted) setState(() => _suggest = e);
     } on Object catch (e) {
       if (mounted) setState(() => _error = _explain(e));
     }
   }
 
+  InternetSuggested? _suggest;
+
+  void _enableInternet() {
+    widget.link.setInternetEnabled(true);
+    if (widget.offer.remote) {
+      _connect();
+    } else {
+      // Il QR code mostrato non prevede internet: serve quello nuovo del PC.
+      Navigator.of(context).pop();
+    }
+  }
+
   String _explain(Object e) {
     final s = '$e';
+    if (e is LinkException && (s.contains('via internet') || s.contains('TURN'))) {
+      return 'Il PC non risponde né sulla rete locale né via internet. Controlla che Firmami sia aperto sul PC '
+          'e che entrambi i dispositivi siano collegati a internet.\n\nDettaglio: $s';
+    }
     if (e is LinkException && s.startsWith('PC non raggiungibile')) {
       return 'Il PC non risponde. Controlla che telefono e PC siano sulla stessa Wi-Fi e che il firewall '
           'di Windows consenta a Firmami di ricevere collegamenti sulle reti private.\n\nDettaglio: $s';
@@ -144,7 +163,33 @@ class _PairPageState extends State<PairPage> {
     final t = Theme.of(context).textTheme;
     final a = _attempt;
     Widget body;
-    if (_error != null) {
+    final suggest = _suggest;
+    if (suggest != null) {
+      body = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            suggest.sameNetwork ? 'Il PC non risponde sulla rete locale' : 'Telefono e PC sono su reti diverse',
+            style: t.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            widget.offer.remote
+                ? 'Puoi collegarti via internet: il PC è già pronto. Passano solo i dati della firma, cifrati da un capo all\'altro.'
+                : 'Puoi collegarti via internet. Sul PC spunta "Il telefono non è sulla stessa rete" nella finestra '
+                      'di abbinamento, poi inquadra di nuovo il QR code.',
+          ),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: _enableInternet,
+            icon: const Icon(Icons.public),
+            label: const Text('Non sono sulla stessa rete'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(onPressed: _connect, child: const Text('Riprova sulla rete locale')),
+        ],
+      );
+    } else if (_error != null) {
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

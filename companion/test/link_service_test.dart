@@ -106,4 +106,37 @@ void main() {
     await expectLater(phone.startPairing(o), throwsA(isA<LinkException>()));
     phone.dispose();
   });
+
+  test('PC non raggiungibile: propone il collegamento via internet e ricorda la scelta', () async {
+    final signaling = SignalingConfig(endpoint: Uri.parse('http://127.0.0.1:9'));
+    final o = PairingOffer(
+      pcId: 'x',
+      pcName: 'PC',
+      pcPublicKey: pcId.publicKey,
+      token: randomBytes(16),
+      addresses: const ['127.0.0.1:1'],
+      remote: true,
+    );
+    Future<PeerLink> noPeers(List<IceServer> _) async => throw const LinkException('WebRTC non disponibile nei test');
+    final phone = await PhoneLink.open(dir, deviceName: 'Telefono', signaling: signaling, peers: noPeers);
+    expect(phone.remoteAvailable, isTrue);
+    expect(phone.internetEnabled, isFalse, reason: 'spento in partenza');
+    await expectLater(phone.startPairing(o), throwsA(isA<InternetSuggested>()));
+
+    phone.setInternetEnabled(true);
+    // Con internet attivo e reti diverse si va subito su internet (qui senza WebRTC).
+    await expectLater(
+      phone.startPairing(o),
+      throwsA(isA<LinkException>().having((e) => e.message, 'message', contains('WebRTC non disponibile'))),
+    );
+    phone.dispose();
+    final again = await PhoneLink.open(dir, deviceName: 'Telefono', signaling: signaling, peers: noPeers);
+    expect(again.internetEnabled, isTrue);
+    again.dispose();
+
+    // Senza servizio nella build non si propone nulla.
+    final plain = await PhoneLink.open(dir, deviceName: 'Telefono');
+    await expectLater(plain.startPairing(o), throwsA(isNot(isA<InternetSuggested>())));
+    plain.dispose();
+  });
 }
