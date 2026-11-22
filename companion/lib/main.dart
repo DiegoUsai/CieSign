@@ -105,10 +105,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_foreground) _link?.connect();
   }
 
-  /// QR code inquadrato con la fotocamera del telefono invece che dall'app.
+  /// Link ciesign://pair arrivato da fuori dell'app. Il filtro non è più
+  /// BROWSABLE, quindi pagine web, email e SMS non lo aprono; resta comunque
+  /// una conferma esplicita, perché un'altra app può inviarlo.
   void _onLink(String uri) {
     try {
-      _pair(PairingOffer.parse(uri));
+      _pair(PairingOffer.parse(uri), fromLink: true);
     } on FormatException catch (e) {
       _snack('QR code non valido: ${e.message}');
     }
@@ -119,9 +121,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (offer != null) await _pair(offer);
   }
 
-  Future<void> _pair(PairingOffer offer) async {
+  Future<void> _pair(PairingOffer offer, {bool fromLink = false}) async {
     final link = _link;
     if (link == null) return;
+    final current = link.pc?.device.name;
+    if (fromLink || current != null) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Abbinare un nuovo PC?'),
+          content: Text(
+            '${fromLink ? 'Procedi solo se hai appena inquadrato il QR code sullo schermo del tuo PC. ' : ''}'
+            '${current != null ? 'Il PC abbinato ora, $current, verrà sostituito da ${offer.pcName}.' : 'Il PC si presenta come ${offer.pcName}.'}',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Annulla')),
+            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Abbina')),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+    }
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => PairPage(link: link, offer: offer)),
     );
@@ -285,21 +305,23 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         Icons.qr_code_scanner,
         null,
         'Nessun PC abbinato',
-        'Sul PC apri CIE Sign, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto '
-            'oppure con la fotocamera del telefono. Telefono e PC devono essere sulla stessa Wi-Fi.',
+        'Sul PC apri CIE Sign, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto'
+            '.${link.remoteEnabled ? '' : ' Telefono e PC devono essere sulla stessa Wi-Fi.'}',
       ),
       LinkState.connected => (
         Icons.link,
         Colors.green,
         'Collegato a $pcName',
-        'In attesa di richieste dal PC. Tieni aperta l\'app durante la firma.',
+        '${link.viaInternet ? 'Via internet. ' : ''}In attesa di richieste dal PC. Tieni aperta l\'app durante la firma.',
       ),
       LinkState.connecting => (Icons.sync, null, 'Collegamento a $pcName…', ''),
       LinkState.disconnected => (
         Icons.link_off,
         theme.colorScheme.error,
         '$pcName non raggiungibile',
-        'Controlla che CIE Sign sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
+        link.remoteEnabled
+            ? 'Controlla che CIE Sign sia aperto sul PC e che PC e telefono siano collegati a internet.'
+            : 'Controlla che CIE Sign sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
       ),
     };
     return Card(
@@ -321,8 +343,35 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             const SizedBox(height: 12),
             if (link.state == LinkState.notPaired)
               FilledButton.icon(onPressed: _scan, icon: const Icon(Icons.qr_code_scanner), label: const Text('Abbina PC')),
+            if (link.state == LinkState.disconnected && link.suggestInternet && !link.internetEnabled) ...[
+              const Text(
+                'Se il telefono non è sulla stessa rete del PC, per esempio in 4G o su un\'altra Wi-Fi, '
+                'puoi collegarti via internet. Sul PC va attivata la stessa opzione.',
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () {
+                  link.setInternetEnabled(true);
+                  link.connect();
+                },
+                icon: const Icon(Icons.public),
+                label: const Text('Non sono sulla stessa rete'),
+              ),
+              const SizedBox(height: 8),
+            ],
             if (link.state == LinkState.disconnected)
               FilledButton.icon(onPressed: link.connect, icon: const Icon(Icons.refresh), label: const Text('Ricollega')),
+            if (link.remoteAvailable && link.state != LinkState.notPaired)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Non sono sulla stessa rete'),
+                subtitle: const Text('Collegamento via internet quando il PC non è sulla rete locale'),
+                value: link.internetEnabled,
+                onChanged: (v) {
+                  link.setInternetEnabled(v);
+                  if (v && link.state == LinkState.disconnected) link.connect();
+                },
+              ),
           ],
         ),
       ),

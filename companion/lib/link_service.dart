@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:ciesign_link/ciesign_link.dart';
+import 'package:ciesign_webrtc/ciesign_webrtc.dart';
 import 'package:flutter/foundation.dart';
 
 /// PC abbinato, con gli indirizzi letti dal QR code per ricollegarsi.
@@ -46,10 +47,21 @@ class PairingAttempt {
 ///
 /// Nel prototipo i dati stanno in un file privato dell'app; il seme della
 /// chiave andrà nell'Android Keystore prima della beta.
+///
+/// Il collegamento usa la rete locale. Se la build ha un servizio di
+/// signaling e l'utente lo attiva ("Non sono sulla stessa rete"), passa anche
+/// da internet con **WebRTC**, così funziona con il telefono in 4G/5G o su
+/// un'altra Wi-Fi. Quando il PC non risponde e l'opzione è spenta, l'app la
+/// propone ([InternetSuggested]).
 class PhoneLink extends ChangeNotifier {
-  PhoneLink._(this._file, this.identity, this.pc, this.certificate);
+  PhoneLink._(this._file, this._internet, this.identity, this.pc, this.certificate, this._rendezvous);
 
-  static Future<PhoneLink> open(Directory dir, {required String deviceName}) async {
+  static Future<PhoneLink> open(
+    Directory dir, {
+    required String deviceName,
+    SignalingConfig? signaling,
+    PeerLinkFactory peers = createWebRtcPeer,
+  }) async {
     final file = File('${dir.path}${Platform.pathSeparator}collegamento.json');
     Map<String, Object?> j = {};
     if (file.existsSync()) {
@@ -63,11 +75,14 @@ class PhoneLink extends ChangeNotifier {
     final identity = idJson != null ? await DeviceIdentity.fromJson(idJson) : await DeviceIdentity.create(deviceName);
     final pcJson = j['pc'] as Map<String, Object?>?;
     final cert = j['certificate'] as String?;
+    final config = signaling ?? SignalingConfig.fromEnvironment();
     final link = PhoneLink._(
       file,
+      j['internet'] == true,
       identity,
       pcJson == null ? null : PairedPc.fromJson(pcJson),
       cert == null ? null : base64.decode(cert),
+      config == null ? null : Rendezvous(SignalingClient(config), peers),
     );
     link._save();
     return link;
@@ -75,7 +90,34 @@ class PhoneLink extends ChangeNotifier {
 
   final File _file;
   final DeviceIdentity identity;
+  final Rendezvous? _rendezvous;
   PairedPc? pc;
+
+  /// Vero se questa build sa collegarsi anche via internet.
+  bool get remoteAvailable => _rendezvous != null;
+
+  bool _internet;
+
+  /// Scelta dell'utente "Non sono sulla stessa rete": spenta in partenza.
+  bool get internetEnabled => _internet;
+
+  /// Vero se il collegamento via internet è disponibile e attivo.
+  bool get remoteEnabled => remoteAvailable && _internet;
+
+  /// Ultimo tentativo fallito perché il PC non risponde sulla rete locale
+  /// con il collegamento via internet spento: la schermata principale propone
+  /// di attivarlo.
+  bool suggestInternet = false;
+
+  void setInternetEnabled(bool on) {
+    _internet = on;
+    suggestInternet = false;
+    _save();
+    notifyListeners();
+  }
+
+  /// Vero se la sessione attiva passa da internet e non dalla rete locale.
+  bool viaInternet = false;
 
   /// Certificato dell'ultima CIE letta: lo si manda al PC senza chiedere di
   /// nuovo la carta, perché è un dato pubblico.
@@ -99,10 +141,16 @@ class PhoneLink extends ChangeNotifier {
   /// Primo abbinamento: si collega agli indirizzi del QR code e fa la
   /// stretta di mano; poi l'utente confronta il codice di sei cifre.
   Future<PairingAttempt> startPairing(PairingOffer offer) async {
-    if (offer.addresses.isEmpty) {
+    final remote = offer.remote && remoteEnabled ? _rendezvous : null;
+    if (offer.addresses.isEmpty && remote == null && !(offer.remote && remoteAvailable)) {
       throw const LinkException('Il QR code non contiene indirizzi: il PC non è collegato a una rete locale');
     }
-    final ch = await PhoneLinkClient.connect(offer.addresses);
+    final (ch, internet) = await _open(
+      offer.addresses,
+      () async => Room.forPairing(offer.token),
+      remote,
+      canSuggest: remoteAvailable,
+    );
     final SecureChannel c;
     try {
       c = await Handshake.pairAsPhone(ch, offer, identity);
@@ -110,9 +158,52 @@ class PhoneLink extends ChangeNotifier {
       await ch.close();
       rethrow;
     }
+    viaInternet = internet;
     final attempt = PairingAttempt._(this, c, offer.addresses);
     _listen(c, attempt);
     return attempt;
+  }
+
+  /// Rete locale prima, internet poi. Restituisce il canale e se passa da
+  /// internet.
+  Future<(FrameChannel, bool)> _open(
+    List<String> addresses,
+    Future<Room> Function() room,
+    Rendezvous? remote, {
+    required bool canSuggest,
+  }) async {
+    Object? lanError;
+    var same = true;
+    try {
+      same = addresses.isNotEmpty && await onSameNetwork(addresses);
+    } on Object {
+      same = true; // nel dubbio si prova la rete locale
+    }
+    // Su reti diverse, con internet attivo, non si aspettano i tempi della
+    // rete locale; con internet spento la si prova comunque, perché alcune
+    // reti instradano più sottoreti.
+    if (addresses.isNotEmpty && (same || remote == null)) {
+      try {
+        return (await PhoneLinkClient.connect(addresses), false);
+      } on Object catch (e) {
+        lanError = e;
+      }
+    }
+    if (remote == null) {
+      if (canSuggest) {
+        throw InternetSuggested(
+          same ? 'Il PC non risponde sulla rete locale' : 'Il telefono e il PC non sembrano sulla stessa rete',
+          sameNetwork: same,
+        );
+      }
+      throw lanError ?? const LinkException('PC non raggiungibile');
+    }
+    try {
+      return (await remote.dial(await room()), true);
+    } on Object catch (e) {
+      final m = e is LinkException ? e.message : 'servizio di collegamento non raggiungibile ($e)';
+      throw LinkException(lanError == null ? m : 'PC non raggiungibile sulla rete locale né via internet: $m');
+    }
   }
 
   Future<bool> _confirmPairing(PairingAttempt a, bool ok) async {
@@ -154,16 +245,26 @@ class PhoneLink extends ChangeNotifier {
     _connecting = true;
     notifyListeners();
     try {
-      final ch = await PhoneLinkClient.connect(p.addresses);
+      final (ch, internet) = await _open(
+        p.addresses,
+        () => Room.forPairedDevices(identity.keyPair, p.device.publicKey),
+        remoteEnabled ? _rendezvous : null,
+        canSuggest: remoteAvailable,
+      );
       try {
         final c = await Handshake.helloAsPhone(ch, p.device, identity);
         _session = c;
+        viaInternet = internet;
+        suggestInternet = false;
         _listen(c, null);
         lastError = null;
       } on Object {
         await ch.close();
         rethrow;
       }
+    } on InternetSuggested catch (e) {
+      lastError = e.message;
+      suggestInternet = true;
     } on Object catch (e) {
       lastError = '$e';
     } finally {
@@ -232,6 +333,7 @@ class PhoneLink extends ChangeNotifier {
     _file.writeAsStringSync(
       jsonEncode({
         'identity': identity.toJson(),
+        if (_internet) 'internet': true,
         if (pc != null) 'pc': pc!.toJson(),
         if (certificate != null) 'certificate': base64.encode(certificate!),
       }),
@@ -250,6 +352,7 @@ class PhoneLink extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _session?.close();
+    _rendezvous?.signaling.close();
     _requests.close();
     super.dispose();
   }
