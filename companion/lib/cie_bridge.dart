@@ -52,7 +52,16 @@ class CieBridge {
           onStatus?.call(call.arguments as String);
         case 'link':
           onLink?.call(call.arguments as String);
+        case 'prepare':
+          final prepare = _prepare;
+          if (prepare == null) throw PlatformException(code: 'PREPARE_FAILED', message: 'Nessuna firma in corso');
+          try {
+            return await prepare(call.arguments as Uint8List);
+          } on Object catch (e) {
+            throw PlatformException(code: 'PREPARE_FAILED', message: '$e');
+          }
       }
+      return null;
     });
   }
 
@@ -102,6 +111,33 @@ class CieBridge {
         remainingAttempts: details is int ? details : null,
         trace: details is String ? details : null,
       );
+    }
+  }
+
+  Future<Uint8List> Function(Uint8List certificate)? _prepare;
+
+  /// Come [start], ma l'impronta da firmare la calcola [prepare] dal certificato
+  /// appena letto, nella stessa sessione: la carta si avvicina una volta sola.
+  /// Se [prepare] fallisce la sessione si chiude con l'errore `PREPARE_FAILED`,
+  /// il cui messaggio è quello dell'eccezione.
+  Future<CieResult> startWithPreparation({
+    required String pin,
+    required Future<Uint8List> Function(Uint8List certificate) prepare,
+  }) async {
+    _prepare = prepare;
+    try {
+      final m = await _channel.invokeMapMethod<Object?, Object?>('start', {'pin': pin, 'prepare': true});
+      return CieResult.fromMap(m!);
+    } on PlatformException catch (e) {
+      final details = e.details;
+      throw CieError(
+        e.code,
+        e.message ?? e.code,
+        remainingAttempts: details is int ? details : null,
+        trace: details is String ? details : null,
+      );
+    } finally {
+      _prepare = null;
     }
   }
 

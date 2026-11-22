@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:ciesign_link/ciesign_link.dart';
 import 'package:crypto/crypto.dart';
@@ -9,8 +10,10 @@ import 'package:path_provider/path_provider.dart';
 
 import 'cie_bridge.dart';
 import 'link_service.dart';
+import 'local_sign.dart';
 import 'pair_page.dart';
 import 'request_page.dart';
+import 'sign_file_page.dart';
 
 void main() => runApp(const CieSignCompanionApp());
 
@@ -53,6 +56,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Timer? _retry;
   bool _requestOpen = false;
   bool _foreground = true;
+  SignedStore? _store;
+  List<File> _signed = const [];
 
   @override
   void initState() {
@@ -74,6 +79,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   Future<void> _open() async {
     try {
       final dir = await getApplicationSupportDirectory();
+      _store = SignedStore(Directory('${(await getApplicationDocumentsDirectory()).path}/firmati'));
+      _refreshSigned();
       final link = await PhoneLink.open(dir, deviceName: await _bridge.deviceName());
       link.addListener(() {
         if (mounted) setState(() {});
@@ -151,6 +158,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  Future<void> _refreshSigned() async {
+    final list = await _store?.list() ?? const <File>[];
+    if (mounted) setState(() => _signed = list);
+  }
+
+  Future<void> _signFile() async {
+    final store = _store;
+    if (store == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SignFilePage(bridge: _bridge, store: store, onCertificate: _link?.rememberCertificate),
+      ),
+    );
+    await _refreshSigned();
+  }
+
+  void _openSigned(File f) {
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(f.uri.pathSegments.last, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 16),
+              SignedFileActions(file: f),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _snack(String text) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
@@ -189,6 +232,28 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               const Center(child: CircularProgressIndicator())
             else
               _linkCard(link, theme),
+            const SizedBox(height: 16),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.draw_outlined),
+                title: const Text('Firma un documento'),
+                subtitle: const Text('Scegli un file dal telefono e firmalo con la CIE, senza PC'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: _store == null ? null : _signFile,
+              ),
+            ),
+            if (_signed.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Text('Firmati sul telefono', style: theme.textTheme.titleSmall),
+              for (final f in _signed.take(10))
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(f.path.toLowerCase().endsWith('.pdf') ? Icons.picture_as_pdf : Icons.description),
+                  title: Text(f.uri.pathSegments.last, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(_when(f.lastModifiedSync())),
+                  onTap: () => _openSigned(f),
+                ),
+            ],
             const SizedBox(height: 16),
             Card(
               child: ListTile(
@@ -263,6 +328,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+String _when(DateTime d) {
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
 }
 
 /// Schermata del prototipo: legge il certificato dalla CIE e firma un'impronta di prova.
