@@ -55,3 +55,10 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Sblocco facoltativo del PIN con impronta, volto o blocco schermo (PinVault.kt).
+    implementation("androidx.biometric:biometric:1.1.0")
+    // Tema AppCompat: serve alla finestra dell'impronta sulle versioni di Android prima della 9.
+    implementation("androidx.appcompat:appcompat:1.7.1")
+}

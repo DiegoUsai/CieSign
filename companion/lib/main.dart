@@ -12,6 +12,7 @@ import 'cie_bridge.dart';
 import 'link_service.dart';
 import 'local_sign.dart';
 import 'pair_page.dart';
+import 'pin_unlock.dart';
 import 'request_page.dart';
 import 'sign_file_page.dart';
 
@@ -274,6 +275,18 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                   onTap: () => _openSigned(f),
                 ),
             ],
+            const SizedBox(height: 16),
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.fingerprint),
+                title: const Text('Sblocco del PIN'),
+                subtitle: const Text('Facoltativo: firma con impronta, volto o blocco schermo invece di digitare il PIN'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => PinUnlockSettingsPage(bridge: _bridge)),
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             Card(
               child: ListTile(

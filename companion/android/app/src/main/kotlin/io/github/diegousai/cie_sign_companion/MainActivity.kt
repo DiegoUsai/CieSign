@@ -9,7 +9,8 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import io.flutter.embedding.android.FlutterActivity
+import androidx.lifecycle.Lifecycle
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -36,23 +37,36 @@ import java.util.concurrent.TimeUnit
  *   Flutter (metodo "prepare") dal certificato appena letto, nella stessa sessione;
  * - cancel: interrompe l'attesa della carta;
  * - initialLink: collegamento ciesign://pair?... con cui l'app è stata aperta;
- * - deviceName: produttore e modello del telefono, mostrati sul PC.
+ * - deviceName: produttore e modello del telefono, mostrati sul PC;
+ * - vaultStatus, vaultSetEnabled, vaultSave, vaultForget: sblocco facoltativo del PIN
+ *   con biometria o blocco schermo (vedi [PinVault]). Con savedPin=true, "start" chiede
+ *   lo sblocco e usa il PIN salvato, che non passa mai da Flutter.
  * Durante l'operazione invia a Flutter il metodo "status" con lo stato corrente,
  * e il metodo "link" quando un QR code di abbinamento apre l'app già avviata.
  */
-class MainActivity : FlutterActivity() {
+// FlutterFragmentActivity perché BiometricPrompt richiede una FragmentActivity.
+class MainActivity : FlutterFragmentActivity() {
 
     private lateinit var channel: MethodChannel
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
     private var pending: PendingRequest? = null
     private var initialLink: String? = null
+    private val vault by lazy { PinVault(this) }
+
+    /** Sblocco del PIN salvato in corso: blocca altre richieste finché non finisce. */
+    private var unlocking = false
+
+    /** Richiesta già sbloccata che attende il ritorno dell'attività in primo piano. */
+    private var deferred: PendingRequest? = null
 
     private class PendingRequest(
         val pin: CharArray,
         val digest: ByteArray?,
         val prepare: Boolean,
         val result: MethodChannel.Result,
+        /** Il PIN viene dalla custodia: se la carta lo rifiuta, lo si cancella. */
+        val fromVault: Boolean,
     ) {
         /** Diventa vero alla prima carta rilevata, per ignorare rilevamenti successivi. */
         val started = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -109,7 +123,27 @@ class MainActivity : FlutterActivity() {
                 val model = Build.MODEL
                 result.success(if (model.startsWith(maker, ignoreCase = true)) model else "$maker $model")
             }
+            "vaultStatus" -> result.success(vault.status())
+            "vaultSetEnabled" -> {
+                vault.setEnabled(call.argument<Boolean>("enabled") == true)
+                result.success(vault.status())
+            }
+            "vaultForget" -> {
+                vault.forget()
+                result.success(vault.status())
+            }
+            "vaultSave" -> {
+                val pin = (call.argument<String>("pin") ?: "").toCharArray()
+                if (pin.size != 8 || pin.any { it !in '0'..'9' }) {
+                    pin.fill('0')
+                    result.error("BAD_PIN", "Il PIN della CIE è di 8 cifre", null)
+                } else {
+                    vault.save(pin, { result.success(vault.status()) }, { result.error(it.code, it.message, null) })
+                }
+            }
             "cancel" -> {
+                deferred?.let { it.pin.fill('0'); it.result.error("CANCELLED", "Operazione annullata", null) }
+                deferred = null
                 stopReader()
                 pending?.let { it.pin.fill('0'); it.result.error("CANCELLED", "Operazione annullata", null) }
                 pending = null
@@ -125,18 +159,56 @@ class MainActivity : FlutterActivity() {
             result.error("NFC_OFF", "NFC assente o disattivato", null)
             return
         }
-        if (pending != null) {
+        if (pending != null || unlocking) {
             result.error("BUSY", "Un'operazione è già in corso", null)
             return
         }
-        val pin = (call.argument<String>("pin") ?: "").toCharArray()
         val digest = call.argument<ByteArray>("digest")
         if (digest != null && digest.size != 32) {
             result.error("BAD_DIGEST", "L'impronta deve essere SHA-256 (32 byte)", null)
             return
         }
         val prepare = call.argument<Boolean>("prepare") == true
-        pending = PendingRequest(pin, digest, prepare, result)
+        if (call.argument<Boolean>("savedPin") == true) {
+            unlocking = true
+            vault.unlock(
+                onPin = { pin ->
+                    unlocking = false
+                    startWhenResumed(PendingRequest(pin, digest, prepare, result, fromVault = true))
+                },
+                onError = {
+                    unlocking = false
+                    result.error(it.code, it.message, null)
+                },
+            )
+            return
+        }
+        val pin = (call.argument<String>("pin") ?: "").toCharArray()
+        startReader(PendingRequest(pin, digest, prepare, result, fromVault = false))
+    }
+
+    /**
+     * Lo sblocco con il blocco schermo apre una schermata di sistema e mette in pausa
+     * l'attività; la modalità lettore NFC funziona solo in primo piano, quindi si
+     * aspetta che l'attività torni attiva.
+     */
+    private fun startWhenResumed(request: PendingRequest) {
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) startReader(request) else deferred = request
+    }
+
+    override fun onResume() {
+        super.onResume()
+        deferred?.let { r -> deferred = null; main.post { startReader(r) } }
+    }
+
+    private fun startReader(request: PendingRequest) {
+        val adapter = NfcAdapter.getDefaultAdapter(this)
+        if (adapter == null || !adapter.isEnabled) {
+            request.pin.fill('0')
+            request.result.error("NFC_OFF", "NFC assente o disattivato", null)
+            return
+        }
+        pending = request
         status("Avvicina la CIE al retro del telefono e tienila ferma")
         val extras = Bundle().apply { putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 1000) }
         adapter.enableReaderMode(
@@ -197,8 +269,11 @@ class MainActivity : FlutterActivity() {
                 )
                 finish(request) { it.success(payload) }
             } catch (e: WrongPinException) {
+                // Un PIN salvato rifiutato non si riprova mai da solo: costerebbe altri tentativi.
+                if (request.fromVault) vault.forget()
                 finish(request) { it.error("WRONG_PIN", e.message, e.remainingAttempts) }
             } catch (e: PinBlockedException) {
+                if (request.fromVault) vault.forget()
                 finish(request) { it.error("PIN_BLOCKED", e.message, trace.toString()) }
             } catch (e: InvalidPinFormatException) {
                 finish(request) { it.error("BAD_PIN", e.message, trace.toString()) }

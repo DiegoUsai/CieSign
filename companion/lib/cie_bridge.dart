@@ -99,9 +99,12 @@ class CieBridge {
 
   /// Attende la carta, verifica il [pin] e legge il certificato; se [digest] è
   /// presente fa firmare alla carta quell'impronta SHA-256.
-  Future<CieResult> start({required String pin, Uint8List? digest}) async {
+  ///
+  /// Con [pin] nullo si usa il PIN salvato sul telefono, dopo lo sblocco con
+  /// biometria o blocco schermo (vedi [vaultStatus]); il PIN non passa da Flutter.
+  Future<CieResult> start({String? pin, Uint8List? digest}) async {
     try {
-      final m = await _channel.invokeMapMethod<Object?, Object?>('start', {'pin': pin, 'digest': digest});
+      final m = await _channel.invokeMapMethod<Object?, Object?>('start', {..._pinArgs(pin), 'digest': digest});
       return CieResult.fromMap(m!);
     } on PlatformException catch (e) {
       final details = e.details;
@@ -121,12 +124,12 @@ class CieBridge {
   /// Se [prepare] fallisce la sessione si chiude con l'errore `PREPARE_FAILED`,
   /// il cui messaggio è quello dell'eccezione.
   Future<CieResult> startWithPreparation({
-    required String pin,
+    required String? pin,
     required Future<Uint8List> Function(Uint8List certificate) prepare,
   }) async {
     _prepare = prepare;
     try {
-      final m = await _channel.invokeMapMethod<Object?, Object?>('start', {'pin': pin, 'prepare': true});
+      final m = await _channel.invokeMapMethod<Object?, Object?>('start', {..._pinArgs(pin), 'prepare': true});
       return CieResult.fromMap(m!);
     } on PlatformException catch (e) {
       final details = e.details;
@@ -142,6 +145,89 @@ class CieBridge {
   }
 
   Future<void> cancel() => _channel.invokeMethod('cancel');
+
+  static Map<String, Object?> _pinArgs(String? pin) => pin == null ? {'savedPin': true} : {'pin': pin};
+
+  /// Stato dello sblocco facoltativo del PIN (UC13). Fuori da Android risulta
+  /// non disponibile.
+  Future<VaultStatus> vaultStatus() => _vault('vaultStatus');
+
+  /// Attiva o disattiva lo sblocco; disattivandolo il PIN salvato si cancella.
+  Future<VaultStatus> setVaultEnabled(bool enabled) => _vault('vaultSetEnabled', {'enabled': enabled});
+
+  /// Cancella il PIN salvato, lasciando la funzione attiva.
+  Future<VaultStatus> forgetPin() => _vault('vaultForget');
+
+  /// Salva [pin] dopo lo sblocco con biometria o blocco schermo. Va chiamato solo
+  /// dopo che la carta ha accettato quel PIN.
+  Future<VaultStatus> savePin(String pin) => _vault('vaultSave', {'pin': pin});
+
+  Future<VaultStatus> _vault(String method, [Map<String, Object?>? args]) async {
+    try {
+      final m = await _channel.invokeMapMethod<String, Object?>(method, args);
+      return VaultStatus.fromMap(m ?? const {});
+    } on MissingPluginException {
+      return const VaultStatus.unavailable();
+    } on PlatformException catch (e) {
+      throw CieError(e.code, e.message ?? e.code);
+    }
+  }
+}
+
+/// Disponibilità dello sblocco del PIN sul telefono.
+enum VaultAvailability {
+  /// Impronta, volto o blocco schermo configurati e abbastanza sicuri.
+  ready,
+
+  /// Il telefono lo permetterebbe, ma non c'è un'impronta o un blocco schermo.
+  notEnrolled,
+
+  /// Nessun metodo di sblocco abbastanza sicuro (o piattaforma non supportata).
+  unsupported,
+}
+
+/// Stato dello sblocco facoltativo del PIN della CIE (UC13, D25).
+class VaultStatus {
+  const VaultStatus({
+    required this.availability,
+    required this.enabled,
+    required this.saved,
+    this.deviceCredential = false,
+  });
+
+  const VaultStatus.unavailable()
+      : availability = VaultAvailability.unsupported,
+        enabled = false,
+        saved = false,
+        deviceCredential = false;
+
+  factory VaultStatus.fromMap(Map<String, Object?> m) => VaultStatus(
+    availability: switch (m['availability']) {
+      'ready' => VaultAvailability.ready,
+      'not_enrolled' => VaultAvailability.notEnrolled,
+      _ => VaultAvailability.unsupported,
+    },
+    enabled: m['enabled'] == true,
+    saved: m['saved'] == true,
+    deviceCredential: m['deviceCredential'] == true,
+  );
+
+  final VaultAvailability availability;
+
+  /// L'utente ha attivato la funzione nelle impostazioni (spenta in partenza).
+  final bool enabled;
+
+  /// C'è un PIN salvato, accettato dalla carta almeno una volta.
+  final bool saved;
+
+  /// Oltre alla biometria è ammesso il blocco schermo del telefono (Android 11+).
+  final bool deviceCredential;
+
+  /// Si può firmare senza digitare il PIN.
+  bool get canUnlock => enabled && saved && availability == VaultAvailability.ready;
+
+  /// Dopo una firma con PIN digitato lo si può salvare.
+  bool get canSave => enabled && !saved && availability == VaultAvailability.ready;
 }
 
 String hex(List<int> bytes, {String sep = ''}) =>
