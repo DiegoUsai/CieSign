@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'cie_bridge.dart';
 import 'local_sign.dart';
+import 'pin_unlock.dart';
 
 /// Firma di un documento sul telefono, senza PC (UC11): scelta del file,
 /// formato, posizione della firma visibile, PIN e CIE.
@@ -295,8 +296,10 @@ class _CieSheet extends StatefulWidget {
   State<_CieSheet> createState() => _CieSheetState();
 }
 
-class _CieSheetState extends State<_CieSheet> {
-  final _pin = TextEditingController();
+class _CieSheetState extends State<_CieSheet> with PinUnlockMixin {
+  @override
+  CieBridge get pinBridge => widget.bridge;
+
   bool _busy = false;
   String? _status;
   String? _error;
@@ -312,11 +315,8 @@ class _CieSheetState extends State<_CieSheet> {
   @override
   void dispose() {
     widget.bridge.onStatus = null;
-    _pin.dispose();
     super.dispose();
   }
-
-  bool get _pinValid => RegExp(r'^\d{8}$').hasMatch(_pin.text);
 
   Future<void> _start() async {
     final nfc = await widget.bridge.nfcStatus();
@@ -334,7 +334,7 @@ class _CieSheetState extends State<_CieSheet> {
     PreparedSignature? prepared;
     try {
       final r = await widget.bridge.startWithPreparation(
-        pin: _pin.text,
+        pin: takePin(),
         prepare: (cert) async {
           prepared = LocalSigner.prepare(widget.doc, widget.format, cert, visible: widget.visible);
           return prepared!.digestToSign;
@@ -343,10 +343,12 @@ class _CieSheetState extends State<_CieSheet> {
       final p = prepared;
       if (p == null || r.signature == null) throw LocalSignException('La carta non ha restituito la firma.');
       final bytes = p.finish(r.signature!);
+      final note = await rememberPinIfWanted();
+      if (note != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(note)));
       if (mounted) Navigator.of(context).pop(_Signed(bytes, r.certificate, p.certificate.holderName));
     } on CieError catch (e) {
-      _pin.clear();
-      if (mounted) setState(() => _error = _errorText(e));
+      final vaultText = vaultErrorText(e);
+      if (mounted) setState(() => _error = vaultText ?? _errorText(e));
     } on LocalSignException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } finally {
@@ -386,20 +388,10 @@ class _CieSheetState extends State<_CieSheet> {
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 16),
-          TextField(
-            controller: _pin,
-            enabled: !_busy,
-            autofocus: true,
-            obscureText: true,
-            keyboardType: TextInputType.number,
-            maxLength: 8,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(labelText: 'PIN della CIE (8 cifre)', border: OutlineInputBorder()),
-            onChanged: (_) => setState(() {}),
-          ),
+          pinInput(context, busy: _busy),
           if (!_busy) ...[
             FilledButton.icon(
-              onPressed: _pinValid ? _start : null,
+              onPressed: pinReady ? _start : null,
               icon: const Icon(Icons.nfc),
               label: const Text('Firma'),
             ),
@@ -422,7 +414,7 @@ class _CieSheetState extends State<_CieSheet> {
           ],
           const SizedBox(height: 8),
           Text(
-            'Firma elettronica avanzata (FEA). Il PIN resta sul telefono e non viene salvato.',
+            pinFootnote,
             style: theme.textTheme.bodySmall,
           ),
         ],

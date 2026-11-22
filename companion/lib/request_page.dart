@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:ciesign_link/ciesign_link.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'cie_bridge.dart';
 import 'link_service.dart';
+import 'pin_unlock.dart';
 
 /// Richiesta arrivata dal PC: firma di un documento (UC3) oppure lettura del
 /// certificato, quando il telefono non lo conosce ancora.
@@ -30,8 +30,10 @@ class RequestPage extends StatefulWidget {
   State<RequestPage> createState() => _RequestPageState();
 }
 
-class _RequestPageState extends State<RequestPage> {
-  final _pin = TextEditingController();
+class _RequestPageState extends State<RequestPage> with PinUnlockMixin {
+  @override
+  CieBridge get pinBridge => widget.bridge;
+
   bool _busy = false;
   bool _answered = false;
   String? _error;
@@ -72,14 +74,11 @@ class _RequestPageState extends State<RequestPage> {
     _ticker?.cancel();
     _cancelSub?.cancel();
     widget.bridge.onStatus = null;
-    _pin.dispose();
     // Chiudendo la pagina senza rispondere, il PC riceve un rifiuto.
     final s = _sign;
     if (!_answered && s != null) widget.link.send(SignRejected(s.id)).ignore();
     super.dispose();
   }
-
-  bool get _pinValid => RegExp(r'^\d{8}$').hasMatch(_pin.text);
 
   Future<void> _reply(LinkMessage m, {bool close = true}) async {
     _answered = true;
@@ -105,11 +104,13 @@ class _RequestPageState extends State<RequestPage> {
       _status = 'Avvicina la CIE al retro del telefono';
     });
     try {
-      final r = await widget.bridge.start(pin: _pin.text, digest: s?.digestToSign);
+      final r = await widget.bridge.start(pin: takePin(), digest: s?.digestToSign);
       final known = widget.link.certificate;
       widget.link.rememberCertificate(r.certificate);
+      final success = s == null || ((known == null || listEquals(known, r.certificate)) && r.signatureValid == true);
+      // Si risponde subito al PC; il salvataggio del PIN, se voluto, viene dopo.
       if (s == null) {
-        await _reply(CertificateResponse(r.certificate));
+        await _reply(CertificateResponse(r.certificate), close: false);
       } else if (known != null && !listEquals(known, r.certificate)) {
         // Il PC ha preparato gli attributi firmati con il certificato di un'altra carta.
         await _reply(
@@ -121,14 +122,19 @@ class _RequestPageState extends State<RequestPage> {
         await _reply(SignError(s.id, 'CIE_ERROR', 'La firma della carta non corrisponde al certificato'), close: false);
         setState(() => _error = 'La firma della carta non corrisponde al certificato.');
       } else {
-        await _reply(SignResponse(s.id, r.signature!, r.certificate));
+        await _reply(SignResponse(s.id, r.signature!, r.certificate), close: false);
+      }
+      if (success) {
+        final note = await rememberPinIfWanted();
+        if (note != null && mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(note)));
+        if (mounted && _error == null) Navigator.of(context).pop(true);
       }
     } on CieError catch (e) {
-      _pin.clear();
+      final vaultText = vaultErrorText(e);
       if (e.code == 'CANCELLED' && _answered) return;
-      final retry = e.code == 'WRONG_PIN' || e.code == 'TAG_LOST' || e.code == 'CANCELLED';
+      final retry = e.code == 'WRONG_PIN' || e.code == 'TAG_LOST' || e.code == 'CANCELLED' || e.code.startsWith('VAULT_');
       if (s != null && !retry) await _reply(SignError(s.id, e.code, e.message, e.remainingAttempts), close: false);
-      if (mounted) setState(() => _error = _errorText(e));
+      if (mounted) setState(() => _error = vaultText ?? _errorText(e));
     } finally {
       if (mounted) {
         setState(() {
@@ -175,26 +181,16 @@ class _RequestPageState extends State<RequestPage> {
             ] else
               Text(
                 '$pcName chiede il certificato della tua CIE, che serve a preparare la firma. '
-                'Inserisci il PIN e avvicina la carta: il telefono lo ricorderà per le prossime firme.',
+                'Inserisci il PIN e avvicina la carta: il telefono ricorderà il certificato per le prossime firme.',
                 style: theme.textTheme.bodyMedium,
               ),
             const SizedBox(height: 16),
             if (!_answered) ...[
-              TextField(
-                controller: _pin,
-                enabled: !_busy,
-                autofocus: true,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                maxLength: 8,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'PIN della CIE (8 cifre)', border: OutlineInputBorder()),
-                onChanged: (_) => setState(() {}),
-              ),
+              pinInput(context, busy: _busy),
               const SizedBox(height: 8),
               if (!_busy) ...[
                 FilledButton.icon(
-                  onPressed: _pinValid ? _start : null,
+                  onPressed: pinReady ? _start : null,
                   icon: const Icon(Icons.nfc),
                   label: Text(s != null ? 'Firma con la CIE' : 'Leggi il certificato'),
                 ),
