@@ -51,6 +51,16 @@ class SignWorkflow {
     return dot > 0 ? '${name.substring(0, dot)}-signed${name.substring(dot)}' : '$name-signed.pdf';
   }
 
+  /// Un .p7m con il documento dentro si firma in parallelo, non con una nuova busta.
+  static bool isCosign(OpenedDocument doc, SignFormat format) {
+    if (format != SignFormat.cades || doc.kind != DocumentKind.p7m) return false;
+    try {
+      return !CmsSignedData.parse(doc.bytes).isDetached;
+    } on Object {
+      return false;
+    }
+  }
+
   Future<SignResult> run(
     OpenedDocument doc,
     SignFormat format, {
@@ -70,6 +80,12 @@ class SignWorkflow {
       attrs = p.signedAttributes;
       finish = p.finish;
       servedDocument = p.preparedPdf;
+    } else if (isCosign(doc, format)) {
+      // Firma parallela: la busta resta una, con un firmatario in più.
+      final p = CadesPreparation.cosign(doc.bytes, cert);
+      attrs = p.signedAttributes;
+      finish = p.finish;
+      servedDocument = p.content;
     } else {
       final p = CadesPreparation.prepare(doc.bytes, cert);
       attrs = p.signedAttributes;
@@ -111,7 +127,7 @@ class SignWorkflow {
       final signature = await signer.sign(request);
       onStatus?.call('Inserimento della firma…');
       final out = finish(signature);
-      return SignResult(out, signedName(doc.name, format), cert.holderName);
+      return SignResult(out, isCosign(doc, format) ? doc.name : signedName(doc.name, format), cert.holderName);
     } on SignatureMismatchException {
       throw SignFailure('La firma ricevuta non corrisponde: è stata usata una CIE diversa da quella registrata?');
     } finally {
