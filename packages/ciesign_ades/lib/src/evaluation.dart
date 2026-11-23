@@ -293,7 +293,7 @@ String overallText(List<SignatureEvaluation> evals) {
 }
 
 const verificationLimits =
-    'CIE Sign verifica l\'integrità delle firme e delle marche temporali, la validità dei certificati alla '
+    'Firmami verifica l\'integrità delle firme e delle marche temporali, la validità dei certificati alla '
     'data di verifica, la revoca del certificato del firmatario (OCSP o CRL, se raggiungibili) e riconosce '
     'i certificati della CIE emessi dal Ministero dell\'Interno. Non controlla ancora l\'elenco europeo dei '
     'prestatori qualificati (EUTL).';
@@ -301,7 +301,7 @@ const verificationLimits =
 /// Rapporto di verifica in testo semplice, da copiare negli appunti.
 String verificationReportText(String documentName, List<SignatureEvaluation> evals, {DateTime? at}) {
   final b = StringBuffer()
-    ..writeln('Rapporto di verifica CIE Sign')
+    ..writeln('Rapporto di verifica Firmami')
     ..writeln('Documento: $documentName')
     ..writeln('Verificato il: ${formatDate(DateTime.now(), seconds: true)}')
     ..writeln('Data di riferimento della verifica: ${formatDate(at ?? DateTime.now())}')

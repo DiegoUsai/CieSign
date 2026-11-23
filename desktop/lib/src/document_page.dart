@@ -170,7 +170,7 @@ class _DocumentPageState extends State<DocumentPage> {
       return;
     }
     if (!_test && !_phoneReady) {
-      setState(() => _status = 'Collega lo smartphone con l\'app CIE Sign per firmare.');
+      setState(() => _status = 'Collega lo smartphone con l\'app Firmami per firmare.');
       return;
     }
     if (!await _confirmUnviewed()) return;
@@ -292,7 +292,7 @@ class _DocumentPageState extends State<DocumentPage> {
             Text(f.name, style: t.titleMedium),
             Text('${(f.bytes.length / 1024).toStringAsFixed(1)} KB'),
             const SizedBox(height: 8),
-            const Text('CIE Sign non mostra l\'anteprima di questo tipo di file.'),
+            const Text('Firmami non mostra l\'anteprima di questo tipo di file.'),
             const SizedBox(height: 16),
             Wrap(
               spacing: 12,
@@ -754,7 +754,7 @@ class _DocumentPageState extends State<DocumentPage> {
           subtitle: Text(
             phoneReady
                 ? 'Alla pressione di Firma, il telefono chiede il PIN e la CIE.'
-                : 'Apri CIE Sign sul telefono, sulla stessa rete Wi-Fi, oppure abbinalo.',
+                : 'Apri Firmami sul telefono, sulla stessa rete Wi-Fi, oppure abbinalo.',
           ),
           trailing: phoneReady || widget.onPair == null
               ? null

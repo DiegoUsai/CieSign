@@ -30,6 +30,10 @@ openssl x509 -inform der -in cert.der -pubkey -noout > pub.pem
 openssl pkeyutl -verify -pubin -inkey pub.pem -in impronta.bin -sigfile firma.bin -pkeyopt digest:sha256
 ```
 
+## App desktop per macOS
+
+Il workflow *App desktop* produce l'artifact `cie-sign-macos`, che contiene un `.dmg` con l'app universale (Apple Silicon e Intel, macOS 12 o successivo). L'app è firmata ad hoc, senza Apple Developer ID e senza notarizzazione: al primo avvio va aperta con *Apri comunque*. Le istruzioni per chi la prova sono in [desktop/macos/LEGGIMI.md](desktop/macos/LEGGIMI.md) e sono copiate anche nel `.dmg`.
+
 ## Test
 
 ```

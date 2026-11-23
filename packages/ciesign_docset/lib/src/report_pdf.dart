@@ -32,7 +32,7 @@ class VerificationReportPdf {
   }) async {
     final now = generatedAt ?? DateTime.now();
     final ref = reference ?? now;
-    final doc = pw.Document(title: 'Rapporto di verifica CIE Sign', author: 'CIE Sign', creator: 'CIE Sign $appVersion'.trim());
+    final doc = pw.Document(title: 'Rapporto di verifica Firmami', author: 'Firmami', creator: 'Firmami $appVersion'.trim());
     final base = pw.TextStyle(fontSize: 9);
     final small = pw.TextStyle(fontSize: 8, color: PdfColors.grey700);
 
@@ -153,7 +153,7 @@ class VerificationReportPdf {
         footer: (c) => pw.Row(
           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
           children: [
-            pw.Text(_t('CIE Sign ${appVersion.isEmpty ? '' : appVersion} - rapporto di verifica'), style: small),
+            pw.Text(_t('Firmami ${appVersion.isEmpty ? '' : appVersion} - rapporto di verifica'), style: small),
             pw.Text('Pagina ${c.pageNumber} di ${c.pagesCount}', style: small),
           ],
         ),
