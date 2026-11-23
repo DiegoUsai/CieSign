@@ -9,10 +9,14 @@ library;
 
 export 'src/cms.dart'
     show CadesPreparation, CmsBuilder, CmsSignedData, CmsSignerInfo, SignatureIntegrity, SignatureMismatchException;
+export 'src/container.dart';
 export 'src/der.dart' show Der, DerNode, DerTag;
+export 'src/evaluation.dart';
 export 'src/oids.dart';
 export 'src/pdf/pades.dart' show PadesPreparation, SignatureAppearanceText, VisibleSignature;
 export 'src/pdf/pdf_document.dart' show PdfDocument, PdfFormatException, PdfRect;
+export 'src/revocation.dart';
+export 'src/revocation_http.dart';
 export 'src/trust.dart';
 export 'src/timestamp.dart';
 export 'src/verify.dart';

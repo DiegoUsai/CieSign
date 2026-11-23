@@ -25,6 +25,9 @@ class Certificate {
 
   BigInt get serialNumber => _tbs[_o].asBigInt;
 
+  /// Numero di serie già codificato in DER (INTEGER), per le richieste OCSP.
+  Uint8List get serialNumberDer => Uint8List.fromList(_tbs[_o].raw);
+
   /// Nome dell'emittente così come codificato nel certificato.
   Uint8List get issuerDer => Uint8List.fromList(_tbs[_o + 2].raw);
   Uint8List get subjectDer => Uint8List.fromList(_tbs[_o + 4].raw);
@@ -65,6 +68,63 @@ class Certificate {
     return out;
   }
 
+  /// Valore della chiave pubblica (BIT STRING senza il byte dei bit inutilizzati):
+  /// la sua impronta SHA-1 identifica l'emittente nelle richieste OCSP.
+  Uint8List get subjectPublicKeyBits => Uint8List.sublistView(_tbs[_o + 5][1].content, 1);
+
+  /// Indirizzi dei servizi OCSP (estensione AuthorityInfoAccess).
+  List<Uri> get ocspUrls => _accessUrls(Oids.authorityInfoAccess, Oids.adOcsp);
+
+  /// Indirizzi da cui scaricare il certificato dell'emittente (AIA caIssuers).
+  List<Uri> get caIssuersUrls => _accessUrls(Oids.authorityInfoAccess, Oids.adCaIssuers);
+
+  List<Uri> _accessUrls(String ext, String method) {
+    final aia = _extensions[ext];
+    if (aia == null) return const [];
+    final out = <Uri>[];
+    for (final ad in aia.children) {
+      if (ad.length < 2 || ad[0].asOid != method) continue;
+      final u = _uriOf(ad[1]);
+      if (u != null) out.add(u);
+    }
+    return out;
+  }
+
+  /// Indirizzi delle liste di revoca (estensione CRLDistributionPoints).
+  List<Uri> get crlUrls {
+    final dp = _extensions[Oids.crlDistributionPoints];
+    if (dp == null) return const [];
+    final out = <Uri>[];
+    void collect(DerNode n) {
+      if (n.tag == 0x86) {
+        final u = _uriOf(n);
+        if (u != null) out.add(u);
+        return;
+      }
+      if (n.isConstructed) {
+        for (final c in n.children) {
+          collect(c);
+        }
+      }
+    }
+
+    collect(dp);
+    return out;
+  }
+
+  static Uri? _uriOf(DerNode n) {
+    if (n.tag != 0x86) return null;
+    final u = Uri.tryParse(String.fromCharCodes(n.content));
+    return u != null && (u.scheme == 'http' || u.scheme == 'https') ? u : null;
+  }
+
+  /// Vero se il certificato è abilitato a firmare risposte OCSP (id-kp-OCSPSigning).
+  bool get allowsOcspSigning {
+    final eku = _extensions[Oids.extKeyUsage];
+    if (eku == null) return false;
+    return eku.children.any((n) => n.tag == DerTag.oid && n.asOid == Oids.kpOcspSigning);
+  }
+
   /// Vero se l'estensione KeyUsage consente digitalSignature; vero anche se
   /// l'estensione manca, perché allora l'uso non è limitato.
   bool get allowsDigitalSignature {
@@ -93,6 +153,20 @@ class Certificate {
       return false;
     }
   }
+
+  /// Verifica una firma fatta con la chiave di questo certificato su [data],
+  /// con l'algoritmo [algorithmOid] (RSA con SHA-1, SHA-256, SHA-384 o SHA-512).
+  bool verifies(String algorithmOid, List<int> data, List<int> signature) {
+    try {
+      return rsaPublicKey.verify(algorithmOid, data, signature);
+    } on UnsupportedError {
+      return false;
+    }
+  }
+
+  /// Come [isIssuedBy], ma con qualunque algoritmo RSA supportato.
+  bool isSignedBy(Certificate issuer) =>
+      _bytesEqual(issuerDer, issuer.subjectDer) && issuer.verifies(signatureAlgorithm, tbsDer, signatureValue);
 
   bool isValidAt(DateTime t) => !t.isBefore(notBefore) && !t.isAfter(notAfter);
 
@@ -158,6 +232,29 @@ class RsaPublicKey {
 
   int get sizeInBytes => (modulus.bitLength + 7) >> 3;
 
+  /// Verifica una firma **PKCS#1 v1.5** di [data] con l'algoritmo indicato.
+  bool verify(String algorithmOid, List<int> data, List<int> signature) {
+    final (hash, prefix) = switch (algorithmOid) {
+      Oids.sha256WithRsa => (sha256, Rsa.sha256DigestInfoPrefix),
+      Oids.sha1WithRsa => (sha1, Rsa.sha1DigestInfoPrefix),
+      Oids.sha384WithRsa => (sha384, Rsa.sha384DigestInfoPrefix),
+      Oids.sha512WithRsa => (sha512, Rsa.sha512DigestInfoPrefix),
+      _ => throw UnsupportedError('Algoritmo di firma non supportato ($algorithmOid)'),
+    };
+    final t = [...prefix, ...hash.convert(data).bytes];
+    final k = sizeInBytes;
+    if (signature.length != k || k < t.length + 11) return false;
+    final s = _toBigInt(signature);
+    if (s >= modulus) return false;
+    final em = _fromBigInt(s.modPow(exponent, modulus), k);
+    final expected = [0x00, 0x01, ...List.filled(k - t.length - 3, 0xff), 0x00, ...t];
+    var diff = 0;
+    for (var i = 0; i < k; i++) {
+      diff |= em[i] ^ expected[i];
+    }
+    return diff == 0;
+  }
+
   /// Verifica una firma **PKCS#1 v1.5** su un'impronta SHA-256.
   bool verifySha256(List<int> digest, List<int> signature) {
     if (signature.length != sizeInBytes) return false;
@@ -198,6 +295,16 @@ class Rsa {
     0x00,
     0x04,
     0x20,
+  ]);
+
+  static final sha1DigestInfoPrefix = Uint8List.fromList([
+    0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14, //
+  ]);
+  static final sha384DigestInfoPrefix = Uint8List.fromList([
+    0x30, 0x41, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x02, 0x05, 0x00, 0x04, 0x30, //
+  ]);
+  static final sha512DigestInfoPrefix = Uint8List.fromList([
+    0x30, 0x51, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x03, 0x05, 0x00, 0x04, 0x40, //
   ]);
 
   /// DigestInfo che la CIE riceve e su cui applica da sé il padding PKCS#1.

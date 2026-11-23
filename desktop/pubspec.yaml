@@ -46,6 +46,8 @@ dependencies:
     path: ../packages/firmami_brand
   ciesign_link:
     path: ../packages/ciesign_link
+  ciesign_docset:
+    path: ../packages/ciesign_docset
   ciesign_webrtc:
     path: ../packages/ciesign_webrtc
   crypto: ^3.0.8

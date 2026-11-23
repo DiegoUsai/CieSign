@@ -53,6 +53,7 @@ class CmsBuilder {
     required Uint8List signature,
     required Certificate certificate,
     Uint8List? content,
+    CmsSignedData? cosignOf,
   }) {
     if (signedAttributes.isEmpty || signedAttributes[0] != DerTag.set) {
       throw ArgumentError('Gli attributi firmati devono essere un SET DER');
@@ -67,6 +68,7 @@ class CmsBuilder {
       Der.algorithm(Oids.sha256WithRsa, withNull: true),
       Der.octets(signature),
     ]);
+    if (cosignOf != null) return _addSigner(cosignOf, signerInfo, certificate);
     final sd = Der.seq([
       Der.smallInt(1),
       Der.setOf([Der.algorithm(Oids.sha256)]),
@@ -78,6 +80,40 @@ class CmsBuilder {
   }
 }
 
+/// Firma parallela: aggiunge un firmatario a una busta esistente lasciando
+/// intatti contenuto, firme e certificati già presenti (come "Aggiungi firma"
+/// di Aruba Sign e Dike).
+Uint8List _addSigner(CmsSignedData existing, Uint8List signerInfo, Certificate certificate) {
+  final sd = existing._sd;
+  var i = 0;
+  final version = sd[i++].raw;
+  final algs = <String, List<int>>{};
+  for (final a in sd[i++].children) {
+    algs[a[0].asOid] = a.raw;
+  }
+  algs.putIfAbsent(Oids.sha256, () => Der.algorithm(Oids.sha256));
+  final encap = sd[i++].raw;
+  Uint8List? crls;
+  while (sd[i].tag != DerTag.set) {
+    if (sd[i].tag == DerTag.context(1)) crls = Uint8List.fromList(sd[i].raw);
+    i++;
+  }
+  final signerInfos = [for (final s in sd[i].children) s.raw, signerInfo];
+  final certs = <Certificate>[...existing.certificates];
+  for (final c in [certificate, ?CieTrust.intermediateFor(certificate)]) {
+    if (!certs.contains(c)) certs.add(c);
+  }
+  final body = Der.seq([
+    version,
+    Der.setOf(algs.values.toList()),
+    encap,
+    _certificates(certs),
+    ?crls,
+    Der.setOf(signerInfos),
+  ]);
+  return Der.seq([Der.oid(Oids.signedData), Der.explicit(0, body)]);
+}
+
 /// Campo certificates [0] IMPLICIT SET OF: il firmatario e, se è una CIE, la
 /// CA intermedia che lo ha emesso, così gli altri verificatori ricostruiscono
 /// la catena (RFC 5652, 5.1).
@@ -87,7 +123,23 @@ Uint8List _certificates(List<Certificate> certs) =>
 /// Firma CAdES in due tempi: prima si preparano gli attributi firmati, poi,
 /// ricevuta la firma dalla carta, si compone il file .p7m.
 class CadesPreparation {
-  CadesPreparation._(this.content, this.certificate, this.signedAttributes, this.detached);
+  CadesPreparation._(this.content, this.certificate, this.signedAttributes, this.detached, [this.cosignOf]);
+
+  /// Firma parallela di un .p7m esistente: stessa busta, un firmatario in più.
+  factory CadesPreparation.cosign(Uint8List p7m, Certificate certificate, {DateTime? signingTime}) {
+    final cms = CmsSignedData.parse(p7m);
+    final content = cms.content;
+    if (content == null) throw const FormatException('Firma staccata: la firma parallela richiede una busta .p7m');
+    final attrs = CmsBuilder.signedAttributes(
+      contentDigest: sha256.convert(content).bytes,
+      certificate: certificate,
+      signingTime: signingTime ?? DateTime.now(),
+    );
+    return CadesPreparation._(content, certificate, attrs, false, cms);
+  }
+
+  /// Busta esistente per la firma parallela; nulla per una nuova busta.
+  final CmsSignedData? cosignOf;
 
   factory CadesPreparation.prepare(
     Uint8List content,
@@ -120,6 +172,7 @@ class CadesPreparation {
       signature: signature,
       certificate: certificate,
       content: detached ? null : content,
+      cosignOf: cosignOf,
     );
   }
 }
@@ -162,7 +215,6 @@ class CmsSignedData {
     return CmsSignedData._(sd, signers, certs, content == null ? null : Uint8List.fromList(content));
   }
 
-  // ignore: unused_field
   final DerNode _sd;
   final List<CmsSignerInfo> signers;
   final List<Certificate> certificates;

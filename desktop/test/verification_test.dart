@@ -53,12 +53,13 @@ void main() {
   group('verifica', () {
     final pdf = File('$_res/pades-t-doctimestamp.pdf').readAsBytesSync();
     final reports = PadesVerifier.verify(pdf);
+    final evals = [for (final r in reports) SignatureEvaluation(r, pades: true)];
 
     test('esito complessivo e rapporto', () {
       expect(overallText(const []), 'Il documento non contiene firme');
-      expect(overallText(reports), '1 firma e 1 marca temporale del documento, tutte valide');
-      final text = verificationReportText('contratto.pdf', reports, pades: true);
-      expect(text, contains('Firmatario: MARIO ROSSI'));
+      expect(overallText(evals), '1 firma e 1 marca temporale del documento, tutte valide');
+      final text = verificationReportText('contratto.pdf', evals);
+      expect(text, contains('Titolare: MARIO ROSSI'));
       expect(text, contains('Valore della firma: Certificato di CIE Sign test, non CIE'));
       expect(text, contains('Codice fiscale: RSSMRA80A01H501U'));
       expect(text, contains('TSA di prova CIE Sign'));
@@ -73,16 +74,22 @@ void main() {
         MaterialApp(
           home: Scaffold(
             body: SingleChildScrollView(
-              child: VerificationPanel(reports: reports, documentName: 'contratto.pdf', pades: true),
+              child: VerificationPanel(evaluations: evals, documentName: 'contratto.pdf'),
             ),
           ),
         ),
       );
       expect(find.text('1 firma e 1 marca temporale del documento, tutte valide'), findsOneWidget);
       expect(find.text('MARIO ROSSI'), findsOneWidget);
+      expect(find.text('VALIDA'), findsNWidgets(2));
+      // I dettagli non sono la prima informazione: compaiono aprendo la firma.
+      expect(find.text('Mostra certificato'), findsNothing);
       await tester.tap(find.text('MARIO ROSSI'));
       await tester.pumpAndSettle();
-      expect(find.text('Dettaglio della firma'), findsOneWidget);
+      expect(find.text('Firma integra'), findsOneWidget);
+      await tester.tap(find.text('Mostra certificato'));
+      await tester.pumpAndSettle();
+      expect(find.text('Certificato'), findsOneWidget);
       expect(find.text('RSSMRA80A01H501U'), findsOneWidget);
     });
   });

@@ -1,0 +1,17 @@
+name: ciesign_docset
+description: Fascicolo di documenti di CIE Sign (più documenti aperti insieme, marcature visto, verificato e firmato che restano tra una sessione e l'altra, recenti) e rapporto di verifica in PDF. Condiviso da app desktop e mobile.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  ciesign_ades:
+    path: ../ciesign_ades
+  crypto: ^3.0.8
+  pdf: ^3.11.3
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^6.0.0
