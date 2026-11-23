@@ -91,7 +91,7 @@ class SettingsPage extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             Text('Informazioni', style: theme.textTheme.titleSmall),
-            Card(child: ListTile(leading: const Icon(Icons.info_outline), title: const Text('CIE Sign'), subtitle: Text('Build $buildId'))),
+            Card(child: ListTile(leading: const Icon(Icons.info_outline), title: const Text('Firmami'), subtitle: Text('Build $buildId'))),
           ],
         ),
       ),
@@ -115,21 +115,24 @@ class PcLinkCard extends StatelessWidget {
         Icons.qr_code_scanner,
         null,
         'Nessun PC abbinato',
-        'Serve solo per firmare dal PC: sul telefono puoi firmare anche senza. Sul PC apri CIE Sign, '
-            'scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto o con la fotocamera.',
+        'Serve solo per firmare dal PC: sul telefono puoi firmare anche senza. Sul PC apri Firmami, '
+            'scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto o con la fotocamera'
+            '.${link.remoteEnabled ? '' : ' Telefono e PC devono essere sulla stessa Wi-Fi.'}',
       ),
       LinkState.connected => (
         Icons.link,
         Colors.green,
         'Collegato a $pcName',
-        'In attesa di richieste dal PC. Tieni aperta l\'app durante la firma.',
+        '${link.viaInternet ? 'Via internet. ' : ''}In attesa di richieste dal PC. Tieni aperta l\'app durante la firma.',
       ),
       LinkState.connecting => (Icons.sync, null, 'Collegamento a $pcName…', ''),
       LinkState.disconnected => (
         Icons.link_off,
         theme.colorScheme.error,
         '$pcName non raggiungibile',
-        'Controlla che CIE Sign sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
+        link.remoteEnabled
+            ? 'Controlla che Firmami sia aperto sul PC e che PC e telefono siano collegati a internet.'
+            : 'Controlla che Firmami sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
       ),
     };
     return Card(
@@ -151,8 +154,35 @@ class PcLinkCard extends StatelessWidget {
             const SizedBox(height: 12),
             if (link.state == LinkState.notPaired)
               FilledButton.icon(onPressed: onScan, icon: const Icon(Icons.qr_code_scanner), label: const Text('Abbina PC')),
+            if (link.state == LinkState.disconnected && link.suggestInternet && !link.internetEnabled) ...[
+              const Text(
+                'Se il telefono non è sulla stessa rete del PC, per esempio in 4G o su un\'altra Wi-Fi, '
+                'puoi collegarti via internet. Sul PC va attivata la stessa opzione.',
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () {
+                  link.setInternetEnabled(true);
+                  link.connect();
+                },
+                icon: const Icon(Icons.public),
+                label: const Text('Non sono sulla stessa rete'),
+              ),
+              const SizedBox(height: 8),
+            ],
             if (link.state == LinkState.disconnected)
               FilledButton.icon(onPressed: link.connect, icon: const Icon(Icons.refresh), label: const Text('Ricollega')),
+            if (link.remoteAvailable && link.state != LinkState.notPaired)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Non sono sulla stessa rete'),
+                subtitle: const Text('Collegamento via internet quando il PC non è sulla rete locale'),
+                value: link.internetEnabled,
+                onChanged: (v) {
+                  link.setInternetEnabled(v);
+                  if (v && link.state == LinkState.disconnected) link.connect();
+                },
+              ),
             if (link.pc != null) ...[
               const SizedBox(height: 8),
               OutlinedButton.icon(onPressed: onScan, icon: const Icon(Icons.qr_code_scanner), label: const Text('Abbina un altro PC')),

@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "CIE Sign" "\0"
-            VALUE "FileDescription", "CIE Sign" "\0"
+            VALUE "CompanyName", "Firmami" "\0"
+            VALUE "FileDescription", "Firmami" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "cie_sign_desktop" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 CIE Sign contributors. Licenza MIT." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Firmami contributors. Licenza MIT." "\0"
             VALUE "OriginalFilename", "cie_sign_desktop.exe" "\0"
-            VALUE "ProductName", "CIE Sign" "\0"
+            VALUE "ProductName", "Firmami" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

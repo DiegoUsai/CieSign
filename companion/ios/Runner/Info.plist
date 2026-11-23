@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>CIE Sign</string>
+	<string>Firmami</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -67,7 +67,7 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>NFCReaderUsageDescription</key>
-	<string>CIE Sign legge la Carta d'Identità Elettronica per firmare i documenti.</string>
+	<string>Firmami legge la Carta d'Identità Elettronica per firmare i documenti.</string>
 	<key>com.apple.developer.nfc.readersession.iso7816.select-identifiers</key>
 	<array>
 		<string>A0000000308000000009816001</string>
@@ -78,7 +78,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Serve per inquadrare il QR code di abbinamento mostrato dal PC.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Serve per collegarsi a CIE Sign sul PC nella stessa rete Wi-Fi.</string>
+	<string>Serve per collegarsi a Firmami sul PC nella stessa rete Wi-Fi.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ciesign._tcp</string>

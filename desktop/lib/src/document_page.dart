@@ -129,7 +129,7 @@ class _DocumentPageState extends State<DocumentPage> {
       return;
     }
     if (!_test && !_phoneReady) {
-      setState(() => _status = 'Collega lo smartphone con l\'app CIE Sign per firmare.');
+      setState(() => _status = 'Collega lo smartphone con l\'app Firmami per firmare.');
       return;
     }
     setState(() {
@@ -474,7 +474,7 @@ class _DocumentPageState extends State<DocumentPage> {
             subtitle: Text(
               phoneReady
                   ? 'Alla pressione di Firma, il telefono chiede il PIN e la CIE.'
-                  : 'Apri CIE Sign sul telefono, sulla stessa rete Wi-Fi, oppure abbinalo.',
+                  : 'Apri Firmami sul telefono, sulla stessa rete Wi-Fi, oppure abbinalo.',
             ),
             trailing: phoneReady || widget.onPair == null
                 ? null

@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
+import 'package:firmami_brand/firmami_brand.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'src/document_page.dart';
@@ -30,15 +31,19 @@ class CieSignApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xFF0066CC);
+    const seed = FirmamiColors.red;
     return MaterialApp(
-      title: 'CIE Sign',
+      title: FirmamiColors.appName,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: seed)),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: seed, brightness: Brightness.dark),
       ),
-      home: HomePage(startLink: startLink, initialPath: initialPath, developerMode: developerMode),
+      // Lo splash animato parte solo nell'app vera, non nei test.
+      home: SplashGate(
+        enabled: startLink,
+        child: HomePage(startLink: startLink, initialPath: initialPath, developerMode: developerMode),
+      ),
     );
   }
 }
@@ -118,7 +123,7 @@ class _HomePageState extends State<HomePage> {
     final session = _link?.activeSession;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CIE Sign'),
+        title: const Text('Firmami'),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -154,8 +159,15 @@ class _HomePageState extends State<HomePage> {
             tooltip: 'Altre opzioni',
             onSelected: (v) {
               if (v == 'dev') setState(() => _dev = !_dev);
+              if (v == 'internet') _link?.setInternetEnabled(!_link!.internetEnabled);
             },
             itemBuilder: (context) => [
+              if (_link?.remoteAvailable ?? false)
+                CheckedPopupMenuItem(
+                  value: 'internet',
+                  checked: _link!.internetEnabled,
+                  child: const Text('Il telefono non è sulla stessa rete'),
+                ),
               CheckedPopupMenuItem(value: 'dev', checked: _dev, child: const Text('Modalità sviluppatore')),
             ],
           ),

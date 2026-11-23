@@ -56,7 +56,7 @@ class _PairingDialogState extends State<PairingDialog> {
       body = Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Apri CIE Sign sullo smartphone, scegli "Abbina PC" e inquadra il codice.'),
+          const Text('Apri Firmami sullo smartphone, scegli "Abbina PC" e inquadra il codice.'),
           const SizedBox(height: 16),
           Container(
             color: Colors.white,
@@ -64,9 +64,26 @@ class _PairingDialogState extends State<PairingDialog> {
             child: QrImageView(data: offer.toUri().toString(), size: 260),
           ),
           const SizedBox(height: 12),
-          Text('Il telefono deve essere sulla stessa Wi-Fi del PC.', style: t.bodySmall),
-          if (offer.addresses.isEmpty)
+          Text(
+            offer.remote
+                ? 'Va bene la stessa Wi-Fi, ma anche un\'altra rete o i dati mobili del telefono.'
+                : 'Il telefono deve essere sulla stessa Wi-Fi del PC.',
+            style: t.bodySmall,
+          ),
+          if (offer.addresses.isEmpty && !offer.remote)
             Text('Nessuna rete locale trovata sul PC.', style: t.bodySmall?.copyWith(color: Colors.red)),
+          if (widget.link.remoteAvailable)
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              title: const Text('Il telefono non è sulla stessa rete'),
+              subtitle: Text(
+                'Collegamento via internet, per esempio con il telefono in 4G. Il QR code si aggiorna.',
+                style: t.bodySmall,
+              ),
+              value: widget.link.internetEnabled,
+              onChanged: (v) => widget.link.setInternetEnabled(v ?? false),
+            ),
         ],
       );
     } else {

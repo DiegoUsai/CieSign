@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:ciesign_link/ciesign_link.dart';
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firmami_brand/firmami_brand.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:path_provider/path_provider.dart';
@@ -24,7 +25,7 @@ void main() => runApp(const CieSignCompanionApp());
 const _buildId = String.fromEnvironment('BUILD_ID', defaultValue: 'locale');
 
 ThemeData _theme(Brightness b) =>
-    ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF0066CC), brightness: b));
+    ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: FirmamiColors.red, brightness: b));
 
 class CieSignCompanionApp extends StatelessWidget {
   const CieSignCompanionApp({super.key, this.home});
@@ -35,10 +36,11 @@ class CieSignCompanionApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'CIE Sign',
+      title: FirmamiColors.appName,
       theme: _theme(Brightness.light),
       darkTheme: _theme(Brightness.dark),
-      home: home ?? const HomePage(),
+      // Lo splash animato parte solo nell'app vera; i test passano [home].
+      home: home ?? const SplashGate(child: HomePage()),
     );
   }
 }
@@ -106,10 +108,12 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (_foreground) _link?.connect();
   }
 
-  /// QR code inquadrato con la fotocamera del telefono invece che dall'app.
+  /// Link ciesign://pair arrivato da fuori dell'app. Il filtro non è più
+  /// BROWSABLE, quindi pagine web, email e SMS non lo aprono; resta comunque
+  /// una conferma esplicita, perché un'altra app può inviarlo.
   void _onLink(String uri) {
     try {
-      _pair(PairingOffer.parse(uri));
+      _pair(PairingOffer.parse(uri), fromLink: true);
     } on FormatException catch (e) {
       _snack('QR code non valido: ${e.message}');
     }
@@ -120,9 +124,27 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (offer != null) await _pair(offer);
   }
 
-  Future<void> _pair(PairingOffer offer) async {
+  Future<void> _pair(PairingOffer offer, {bool fromLink = false}) async {
     final link = _link;
     if (link == null) return;
+    final current = link.pc?.device.name;
+    if (fromLink || current != null) {
+      final go = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Abbinare un nuovo PC?'),
+          content: Text(
+            '${fromLink ? 'Procedi solo se hai appena inquadrato il QR code sullo schermo del tuo PC. ' : ''}'
+            '${current != null ? 'Il PC abbinato ora, $current, verrà sostituito da ${offer.pcName}.' : 'Il PC si presenta come ${offer.pcName}.'}',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Annulla')),
+            FilledButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Abbina')),
+          ],
+        ),
+      );
+      if (go != true || !mounted) return;
+    }
     final ok = await Navigator.of(context).push<bool>(
       MaterialPageRoute(builder: (_) => PairPage(link: link, offer: offer)),
     );
@@ -202,7 +224,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final link = _link;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CIE Sign'),
+        title: const Text('Firmami'),
         actions: [
           if (link != null) PcStatusIcon(link: link, onTap: _openSettings),
           IconButton(tooltip: 'Recenti', onPressed: _store == null ? null : _openRecents, icon: const Icon(Icons.history)),
@@ -261,7 +283,7 @@ class PrototypePage extends StatefulWidget {
 class _PrototypePageState extends State<PrototypePage> {
   CieBridge get _bridge => widget.bridge;
   final _pin = TextEditingController();
-  final _text = TextEditingController(text: 'Prova di firma con CIE Sign');
+  final _text = TextEditingController(text: 'Prova di firma con Firmami');
 
   bool _busy = false;
   bool _sign = true;

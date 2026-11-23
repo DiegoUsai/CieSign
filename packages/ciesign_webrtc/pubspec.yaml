@@ -1,0 +1,20 @@
+name: ciesign_webrtc
+description: Collegamento WebRTC di CIE Sign tra PC e smartphone via internet (data channel sotto il protocollo ciesign_link).
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+  flutter: ">=3.38.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_webrtc: ^1.6.3
+  ciesign_link:
+    path: ../ciesign_link
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
