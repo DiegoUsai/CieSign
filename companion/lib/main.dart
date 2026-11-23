@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ciesign_docset/ciesign_docset.dart' show FileSource;
 import 'package:ciesign_link/ciesign_link.dart';
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
@@ -17,7 +18,8 @@ import 'pair_page.dart';
 import 'recents_page.dart';
 import 'settings_page.dart';
 import 'request_page.dart';
-import 'sign_file_page.dart';
+import 'document_page.dart';
+import 'workspace.dart';
 
 void main() => runApp(const CieSignCompanionApp());
 
@@ -62,6 +64,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _requestOpen = false;
   bool _foreground = true;
   SignedStore? _store;
+  MobileWorkspace? _ws;
 
   @override
   void initState() {
@@ -84,6 +87,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       final dir = await getApplicationSupportDirectory();
       _store = SignedStore(Directory('${(await getApplicationDocumentsDirectory()).path}/firmati'));
+      final ws = await MobileWorkspace.open();
+      if (mounted) setState(() => _ws = ws);
       final link = await PhoneLink.open(dir, deviceName: await _bridge.deviceName());
       link.addListener(() {
         if (mounted) setState(() {});
@@ -181,16 +186,42 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  /// Apre uno o più documenti: uno solo va subito alla sua pagina, più di uno
+  /// formano un fascicolo da scorrere, verificare e firmare uno per volta.
   Future<void> _openDocument() async {
+    final ws = _ws;
+    if (ws == null) return;
+    final files = await FilePicker.pickFiles(dialogTitle: 'Apri uno o più documenti');
+    if (files.isEmpty || !mounted) return;
+    await ws.openFiles([for (final f in files) (name: f.name, read: f.readAsBytes)]);
+    if (mounted) await _showWork();
+  }
+
+  Future<void> _resume() async {
+    final ws = _ws;
+    if (ws == null) return;
+    await ws.resume();
+    if (mounted) await _showWork();
+  }
+
+  Future<void> _showWork() async {
+    final ws = _ws!;
+    if (ws.set.items.length == 1) {
+      await _openAt(0);
+    } else {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => DossierPage(ws: ws, openDocument: _openAt)));
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openAt(int index) async {
+    final ws = _ws!;
     final store = _store;
     if (store == null) return;
-    final f = await FilePicker.pickFile(dialogTitle: 'Apri un documento');
-    if (f == null || !mounted) return;
-    final doc = LocalDocument(f.name, await f.readAsBytes());
-    if (!mounted) return;
+    unawaited(ws.select(index));
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => SignFilePage(bridge: _bridge, store: store, onCertificate: _link?.rememberCertificate, initial: doc),
+        builder: (_) => DocumentPage(ws: ws, bridge: _bridge, signedStore: store, onCertificate: _link?.rememberCertificate),
       ),
     );
   }
@@ -210,8 +241,17 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   );
 
   void _openRecents() {
-    final store = _store;
-    if (store != null) Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecentsPage(store: store)));
+    final ws = _ws;
+    if (ws != null) Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecentsPage(ws: ws, openFile: _openPath)));
+  }
+
+  /// Riapre un file dei Recenti nella pagina del documento.
+  Future<void> _openPath(String path) async {
+    final ws = _ws;
+    if (ws == null || !File(path).existsSync()) return;
+    ws.set.clear();
+    ws.set.add([FileSource(path)]);
+    await _openAt(0);
   }
 
   void _snack(String text) {
@@ -227,7 +267,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         title: const Text('Firmami'),
         actions: [
           if (link != null) PcStatusIcon(link: link, onTap: _openSettings),
-          IconButton(tooltip: 'Recenti', onPressed: _store == null ? null : _openRecents, icon: const Icon(Icons.history)),
+          IconButton(tooltip: 'Recenti', onPressed: _ws == null ? null : _openRecents, icon: const Icon(Icons.history)),
           IconButton(tooltip: 'Impostazioni', onPressed: _openSettings, icon: const Icon(Icons.settings)),
         ],
       ),
@@ -254,10 +294,30 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 const SizedBox(height: 24),
                 FilledButton.icon(
                   style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                  onPressed: _store == null ? null : _openDocument,
+                  onPressed: _ws == null ? null : _openDocument,
                   icon: const Icon(Icons.folder_open),
                   label: const Text('Apri un documento'),
                 ),
+                const SizedBox(height: 8),
+                Text(
+                  'Puoi sceglierne anche più di uno, per esempio tutti i documenti di una gara.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall,
+                ),
+                if (_ws != null && _ws!.resumable.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.history_edu),
+                      title: const Text('Riprendi il lavoro'),
+                      subtitle: Text(
+                        _ws!.resumable.length == 1 ? '1 documento aperto l\'ultima volta' : '${_ws!.resumable.length} documenti aperti l\'ultima volta',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _resume,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

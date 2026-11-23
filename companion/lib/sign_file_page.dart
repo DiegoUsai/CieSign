@@ -15,7 +15,7 @@ import 'pin_unlock.dart';
 /// Firma di un documento sul telefono, senza PC (UC11): scelta del file,
 /// formato, posizione della firma visibile, PIN e CIE.
 class SignFilePage extends StatefulWidget {
-  const SignFilePage({super.key, required this.bridge, required this.store, this.onCertificate, this.initial});
+  const SignFilePage({super.key, required this.bridge, required this.store, this.onCertificate, this.initial, this.onSigned});
 
   final CieBridge bridge;
   final SignedStore store;
@@ -23,8 +23,11 @@ class SignFilePage extends StatefulWidget {
   /// Riceve il certificato letto, che il telefono ricorda anche per le firme dal PC.
   final void Function(Uint8List)? onCertificate;
 
-  /// Documento già scelto, usato nei test.
+  /// Documento già scelto (dalla pagina del documento o nei test).
   final LocalDocument? initial;
+
+  /// Chiamata dopo il salvataggio del file firmato, per le marcature e i Recenti.
+  final Future<void> Function(File file, Uint8List bytes, String holder, SignFormat format)? onSigned;
 
   @override
   State<SignFilePage> createState() => _SignFilePageState();
@@ -237,7 +240,11 @@ class _SignFilePageState extends State<SignFilePage> {
     );
     if (out == null || !mounted) return;
     widget.onCertificate?.call(out.certificate);
-    final file = await widget.store.save(LocalSigner.signedName(doc.name, _format), out.bytes);
+    final file = await widget.store.save(
+      LocalSigner.signedName(doc.name, _format, cosign: LocalSigner.isCosign(doc, _format)),
+      out.bytes,
+    );
+    await widget.onSigned?.call(file, out.bytes, out.holder, _format);
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => SignedPage(file: file, holder: out.holder)),
@@ -345,11 +352,13 @@ class _SignFilePageState extends State<SignFilePage> {
 
   Widget _preview(LocalDocument doc) {
     if (!doc.isPdf || doc.isP7m) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
           child: Text(
-            'Anteprima non disponibile per questo tipo di file: verrà firmato in CAdES e salvato come .p7m.',
+            LocalSigner.isCosign(doc, _format)
+                ? 'La tua firma si aggiunge a quelle della busta (firma parallela CAdES): il file resta un unico .p7m.'
+                : 'Anteprima non disponibile per questo tipo di file: verrà firmato in CAdES e salvato come .p7m.',
             textAlign: TextAlign.center,
           ),
         ),

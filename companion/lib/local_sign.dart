@@ -80,12 +80,28 @@ class LocalSigner {
         throw LocalSignException('PDF non supportato: ${e.message}');
       }
     }
+    if (isCosign(doc, format)) {
+      // Firma parallela: la busta resta una, con un firmatario in più (come sul PC).
+      final p = CadesPreparation.cosign(doc.bytes, cert, signingTime: when);
+      return PreparedSignature._(cert, p.digestToSign, p.finish);
+    }
     final p = CadesPreparation.prepare(doc.bytes, cert, signingTime: when);
     return PreparedSignature._(cert, p.digestToSign, p.finish);
   }
 
+  /// Un .p7m con il documento dentro si firma in parallelo, non con una nuova busta.
+  static bool isCosign(LocalDocument doc, SignFormat format) {
+    if (format != SignFormat.cades || !doc.isP7m) return false;
+    try {
+      return !CmsSignedData.parse(doc.bytes).isDetached;
+    } on Object {
+      return false;
+    }
+  }
+
   /// Nome proposto per il file firmato, come sul PC.
-  static String signedName(String name, SignFormat f) {
+  static String signedName(String name, SignFormat f, {bool cosign = false}) {
+    if (cosign) return name;
     if (f == SignFormat.cades) return '$name.p7m';
     final dot = name.lastIndexOf('.');
     return dot > 0 ? '${name.substring(0, dot)}-signed${name.substring(dot)}' : '$name-signed.pdf';
