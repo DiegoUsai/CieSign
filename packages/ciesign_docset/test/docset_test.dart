@@ -18,6 +18,10 @@ void main() {
   final cert = Certificate.fromDer(File('$_res/titolare-test.der').readAsBytesSync());
   final key = RsaPrivateKey.fromPkcs8(File('$_res/titolare-test.pk8').readAsBytesSync());
   late Directory tmp;
+  // Il certificato di prova, autofirmato, fa da radice CIE: altrimenti ogni
+  // firma risulterebbe "da controllare" per l'emittente non riconosciuto.
+  setUpAll(() => CieTrust.testRoots.add(cert));
+  tearDownAll(CieTrust.testRoots.clear);
 
   setUp(() => tmp = Directory.systemTemp.createTempSync('docset'));
   tearDown(() => tmp.deleteSync(recursive: true));

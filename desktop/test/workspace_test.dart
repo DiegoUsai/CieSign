@@ -27,6 +27,10 @@ void main() {
     addTearDown(() => dir.deleteSync(recursive: true));
     final gara = Directory('${dir.path}/gara')..createSync();
     final cert = Certificate.fromDer(File('$_res/titolare-test.der').readAsBytesSync());
+    // Il certificato di prova, autofirmato, fa da radice CIE: qui si prova il
+    // fascicolo, non il riconoscimento dell'emittente.
+    CieTrust.testRoots.add(cert);
+    addTearDown(CieTrust.testRoots.clear);
     final key = RsaPrivateKey.fromPkcs8(File('$_res/titolare-test.pk8').readAsBytesSync());
     final prep = CadesPreparation.prepare(File('$_res/revoca/gara.zip').readAsBytesSync(), cert);
     File('${gara.path}/offerta.zip.p7m').writeAsBytesSync(prep.finish(key.signSha256(prep.digestToSign)));

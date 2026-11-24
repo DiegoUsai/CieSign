@@ -57,10 +57,12 @@ void main() {
 
     test('esito complessivo e rapporto', () {
       expect(overallText(const []), 'Il documento non contiene firme');
-      expect(overallText(evals), '1 firma e 1 marca temporale del documento, tutte valide');
+      // Firma con certificato autofirmato e marca di una TSA di prova: integre,
+      // ma nessuna delle due è riconosciuta, quindi entrambe da controllare.
+      expect(overallText(evals), '1 firma e 1 marca temporale del documento: 2 da controllare');
       final text = verificationReportText('contratto.pdf', evals);
       expect(text, contains('Titolare: MARIO ROSSI'));
-      expect(text, contains('Valore della firma: Certificato di CIE Sign test, non CIE'));
+      expect(text, contains('Valore della firma: Certificato emesso da "CIE Sign test", non da una CA della CIE'));
       expect(text, contains('Codice fiscale: RSSMRA80A01H501U'));
       expect(text, contains('TSA di prova CIE Sign'));
       expect(text, contains('Marca temporale del documento (PAdES, DocTimeStamp)'));
@@ -79,9 +81,10 @@ void main() {
           ),
         ),
       );
-      expect(find.text('1 firma e 1 marca temporale del documento, tutte valide'), findsOneWidget);
+      expect(find.text('1 firma e 1 marca temporale del documento: 2 da controllare'), findsOneWidget);
       expect(find.text('MARIO ROSSI'), findsOneWidget);
-      expect(find.text('VALIDA'), findsNWidgets(2));
+      expect(find.text('DA CONTROLLARE'), findsNWidgets(2));
+      expect(find.text('VALIDA'), findsNothing);
       // I dettagli non sono la prima informazione: compaiono aprendo la firma.
       expect(find.text('Mostra certificato'), findsNothing);
       await tester.tap(find.text('MARIO ROSSI'));

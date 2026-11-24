@@ -195,6 +195,11 @@ class CieTrust {
   static final List<Certificate> roots = [_c(_root2016), _c(_root2024)];
   static final List<Certificate> intermediates = [_c(_subca1), _c(_subca002), _c(_subca003)];
 
+  /// Radici di prova aggiunte dai test, per verificare con certificati
+  /// autoprodotti la logica che vale per le firme CIE (revoca, verifica alla
+  /// data, marcature). Il codice delle app non la usa mai: resta vuota.
+  static final List<Certificate> testRoots = [];
+
   /// CA intermedia della CIE che ha emesso [signer], da inserire nella firma
   /// perché gli altri programmi possano ricostruire la catena.
   static Certificate? intermediateFor(Certificate signer) {
@@ -212,7 +217,7 @@ class CieTrust {
     final path = <Certificate>[signer];
     var current = signer;
     for (var depth = 0; depth < 5; depth++) {
-      for (final r in roots) {
+      for (final r in [...roots, ...testRoots]) {
         if (current.isIssuedBy(r)) {
           path.add(r);
           final valid = path.every((c) => c.isValidAt(when));
