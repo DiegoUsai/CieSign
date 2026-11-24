@@ -33,6 +33,10 @@ Uint8List _bytes(String n) => File('test/resources/revoca/$n').readAsBytesSync()
 
 void main() {
   final ca = _cert('ca'), valido = _cert('valido'), revocato = _cert('revocato');
+  // La CA di prova fa da radice CIE: qui si prova la logica di revoca e di
+  // data, che vale solo per le firme con una catena riconosciuta.
+  setUpAll(() => CieTrust.testRoots.add(ca));
+  tearDownAll(CieTrust.testRoots.clear);
 
   test('legge gli indirizzi OCSP e CRL dal certificato', () {
     expect(valido.ocspUrls.single.toString(), 'http://ocsp.prova.invalid/');

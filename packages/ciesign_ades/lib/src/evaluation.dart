@@ -88,15 +88,24 @@ class SignatureEvaluation {
     return !(poe != null && rt != null && poe.isBefore(rt));
   }
 
+  /// Una firma è valida solo se la catena arriva a una CA della CIE: chiunque
+  /// può creare in pochi secondi un certificato autofirmato con il nome del
+  /// titolare e dell'emittente che preferisce, per cui un emittente non
+  /// riconosciuto è sempre da controllare, anche con firma integra. Lo stesso
+  /// vale per le marche temporali finché l'app non controlla l'elenco europeo
+  /// delle autorità di marcatura (TSA) qualificate: una marca non verificata
+  /// non basta a rendere valida una firma con certificato scaduto.
   Outcome get outcome {
     final r = report;
     if (!r.isIntact) return Outcome.invalid;
     final time = certificateTime;
-    if (r.isDocumentTimestamp) return time == CertificateTime.valid ? Outcome.valid : Outcome.warning;
+    if (r.isDocumentTimestamp) return Outcome.warning;
     if (time == CertificateTime.expired || time == CertificateTime.notYetValid) return Outcome.invalid;
     final chain = r.chain?.status;
     if (chain == ChainStatus.brokenChain || chain == ChainStatus.cieExpired) return Outcome.invalid;
     if (isRevokedAtReference) return Outcome.invalid;
+    if (chain != ChainStatus.cie) return Outcome.warning;
+    if (time == CertificateTime.validAtTimestamp) return Outcome.warning;
     if (revocation.status == RevocationStatus.unknown) return Outcome.warning;
     return Outcome.valid;
   }
@@ -109,11 +118,16 @@ class SignatureEvaluation {
   };
 
   /// Motivo in chiaro quando la firma non è valida o va controllata; nullo se valida.
+  /// Le marche del documento sono sempre da controllare (vedi [outcome]).
   String? get reason {
     final r = report;
     if (!r.isIntact) return integrityText(r.integrity);
     final time = certificateTime;
-    if (r.isDocumentTimestamp) return time == CertificateTime.valid ? null : certificateTimeText;
+    if (r.isDocumentTimestamp) {
+      return time == CertificateTime.valid
+          ? 'Marca temporale integra, autorità di marcatura non verificata'
+          : certificateTimeText;
+    }
     if (time == CertificateTime.expired) {
       return 'Certificato scaduto il ${formatDate(r.certificate!.notAfter)}'
           '${isAtPastDate ? ' (rispetto al ${formatDate(at)})' : ''}';
@@ -122,6 +136,10 @@ class SignatureEvaluation {
     if (r.chain?.status == ChainStatus.brokenChain) return 'Catena di certificazione non valida';
     if (r.chain?.status == ChainStatus.cieExpired) return 'Certificato CIE scaduto alla data della firma';
     if (isRevokedAtReference) return revocationText;
+    if (r.chain?.status != ChainStatus.cie) return 'Firma integra, ma l\'emittente del certificato non è riconosciuto';
+    if (time == CertificateTime.validAtTimestamp) {
+      return 'Certificato scaduto e marca temporale di un\'autorità di marcatura non verificata';
+    }
     if (revocation.status == RevocationStatus.unknown) return 'Impossibile verificare se il certificato è stato revocato';
     return null;
   }
@@ -185,7 +203,8 @@ class SignatureEvaluation {
   String get chainText {
     final chain = report.chain!;
     if (chain.status == ChainStatus.unknownIssuer && report.certificate != null) {
-      return 'Certificato di ${issuerName(report.certificate!)}, non CIE: qualificazione non ancora verificata dall\'app';
+      return 'Certificato emesso da "${issuerName(report.certificate!)}", non da una CA della CIE: l\'app non controlla '
+          'ancora l\'elenco europeo dei prestatori qualificati, quindi non può confermare chi sia il firmatario';
     }
     return chain.label;
   }
