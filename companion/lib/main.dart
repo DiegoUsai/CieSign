@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:ciesign_docset/ciesign_docset.dart' show FileSource;
 import 'package:ciesign_link/ciesign_link.dart';
 import 'package:crypto/crypto.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:firmami_brand/firmami_brand.dart';
 import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
@@ -13,9 +15,11 @@ import 'cie_bridge.dart';
 import 'link_service.dart';
 import 'local_sign.dart';
 import 'pair_page.dart';
-import 'pin_unlock.dart';
+import 'recents_page.dart';
+import 'settings_page.dart';
 import 'request_page.dart';
-import 'sign_file_page.dart';
+import 'document_page.dart';
+import 'workspace.dart';
 
 void main() => runApp(const CieSignCompanionApp());
 
@@ -60,7 +64,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   bool _requestOpen = false;
   bool _foreground = true;
   SignedStore? _store;
-  List<File> _signed = const [];
+  MobileWorkspace? _ws;
 
   @override
   void initState() {
@@ -83,7 +87,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     try {
       final dir = await getApplicationSupportDirectory();
       _store = SignedStore(Directory('${(await getApplicationDocumentsDirectory()).path}/firmati'));
-      _refreshSigned();
+      final ws = await MobileWorkspace.open();
+      if (mounted) setState(() => _ws = ws);
       final link = await PhoneLink.open(dir, deviceName: await _bridge.deviceName());
       link.addListener(() {
         if (mounted) setState(() {});
@@ -181,40 +186,72 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
-  Future<void> _refreshSigned() async {
-    final list = await _store?.list() ?? const <File>[];
-    if (mounted) setState(() => _signed = list);
+  /// Apre uno o più documenti: uno solo va subito alla sua pagina, più di uno
+  /// formano un fascicolo da scorrere, verificare e firmare uno per volta.
+  Future<void> _openDocument() async {
+    final ws = _ws;
+    if (ws == null) return;
+    final files = await FilePicker.pickFiles(dialogTitle: 'Apri uno o più documenti');
+    if (files.isEmpty || !mounted) return;
+    await ws.openFiles([for (final f in files) (name: f.name, read: f.readAsBytes)]);
+    if (mounted) await _showWork();
   }
 
-  Future<void> _signFile() async {
+  Future<void> _resume() async {
+    final ws = _ws;
+    if (ws == null) return;
+    await ws.resume();
+    if (mounted) await _showWork();
+  }
+
+  Future<void> _showWork() async {
+    final ws = _ws!;
+    if (ws.set.items.length == 1) {
+      await _openAt(0);
+    } else {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => DossierPage(ws: ws, openDocument: _openAt)));
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openAt(int index) async {
+    final ws = _ws!;
     final store = _store;
     if (store == null) return;
+    unawaited(ws.select(index));
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => SignFilePage(bridge: _bridge, store: store, onCertificate: _link?.rememberCertificate),
+        builder: (_) => DocumentPage(ws: ws, bridge: _bridge, signedStore: store, onCertificate: _link?.rememberCertificate),
       ),
     );
-    await _refreshSigned();
   }
 
-  void _openSigned(File f) {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(f.uri.pathSegments.last, style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 16),
-              SignedFileActions(file: f),
-            ],
-          ),
+  void _openSettings() => Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => SettingsPage(
+        bridge: _bridge,
+        link: _link,
+        onScan: _scan,
+        buildId: _buildId,
+        openPrototype: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => PrototypePage(bridge: _bridge, onCertificate: _link?.rememberCertificate)),
         ),
       ),
-    );
+    ),
+  );
+
+  void _openRecents() {
+    final ws = _ws;
+    if (ws != null) Navigator.of(context).push(MaterialPageRoute(builder: (_) => RecentsPage(ws: ws, openFile: _openPath)));
+  }
+
+  /// Riapre un file dei Recenti nella pagina del documento.
+  Future<void> _openPath(String path) async {
+    final ws = _ws;
+    if (ws == null || !File(path).existsSync()) return;
+    ws.set.clear();
+    ws.set.add([FileSource(path)]);
+    await _openAt(0);
   }
 
   void _snack(String text) {
@@ -227,176 +264,67 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final link = _link;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Firmami · prototipo $_buildId'),
+        title: const Text('Firmami'),
         actions: [
-          if (link?.pc != null)
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'pair') _scan();
-                if (v == 'forget') link!.unpair();
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'pair', child: Text('Abbina un altro PC')),
-                PopupMenuItem(value: 'forget', child: Text('Dimentica il PC')),
-              ],
-            ),
+          if (link != null) PcStatusIcon(link: link, onTap: _openSettings),
+          IconButton(tooltip: 'Recenti', onPressed: _ws == null ? null : _openRecents, icon: const Icon(Icons.history)),
+          IconButton(tooltip: 'Impostazioni', onPressed: _openSettings, icon: const Icon(Icons.settings)),
         ],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (_openError != null)
-              Card(
-                color: theme.colorScheme.errorContainer,
-                child: Padding(padding: const EdgeInsets.all(12), child: Text(_openError!)),
-              )
-            else if (link == null)
-              const Center(child: CircularProgressIndicator())
-            else
-              _linkCard(link, theme),
-            const SizedBox(height: 16),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.draw_outlined),
-                title: const Text('Firma un documento'),
-                subtitle: const Text('Scegli un file dal telefono e firmalo con la CIE, senza PC'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: _store == null ? null : _signFile,
-              ),
-            ),
-            if (_signed.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Text('Firmati sul telefono', style: theme.textTheme.titleSmall),
-              for (final f in _signed.take(10))
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(f.path.toLowerCase().endsWith('.pdf') ? Icons.picture_as_pdf : Icons.description),
-                  title: Text(f.uri.pathSegments.last, maxLines: 1, overflow: TextOverflow.ellipsis),
-                  subtitle: Text(_when(f.lastModifiedSync())),
-                  onTap: () => _openSigned(f),
-                ),
-            ],
-            const SizedBox(height: 16),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.fingerprint),
-                title: const Text('Sblocco del PIN'),
-                subtitle: const Text('Facoltativo: firma con impronta, volto o blocco schermo invece di digitare il PIN'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => PinUnlockSettingsPage(bridge: _bridge)),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.badge),
-                title: const Text('Prova la carta'),
-                subtitle: Text(
-                  link?.certificate != null
-                      ? 'Certificato della CIE registrato sul telefono'
-                      : 'Legge il certificato e lo registra per le firme dal PC',
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => PrototypePage(bridge: _bridge, onCertificate: link?.rememberCertificate),
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (_openError != null)
+                  Card(
+                    color: theme.colorScheme.errorContainer,
+                    child: Padding(padding: const EdgeInsets.all(12), child: Text(_openError!)),
                   ),
+                Icon(Icons.description_outlined, size: 96, color: theme.colorScheme.primary),
+                const SizedBox(height: 16),
+                Text(
+                  'Apri un documento per vederlo, controllare le firme che contiene e firmarlo con la CIE.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyLarge,
                 ),
-              ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                  onPressed: _ws == null ? null : _openDocument,
+                  icon: const Icon(Icons.folder_open),
+                  label: const Text('Apri un documento'),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Puoi sceglierne anche più di uno, per esempio tutti i documenti di una gara.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall,
+                ),
+                if (_ws != null && _ws!.resumable.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.history_edu),
+                      title: const Text('Riprendi il lavoro'),
+                      subtitle: Text(
+                        _ws!.resumable.length == 1 ? '1 documento aperto l\'ultima volta' : '${_ws!.resumable.length} documenti aperti l\'ultima volta',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: _resume,
+                    ),
+                  ),
+                ],
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
-
-  Widget _linkCard(PhoneLink link, ThemeData theme) {
-    final pcName = link.pc?.device.name;
-    final (IconData icon, Color? color, String title, String text) = switch (link.state) {
-      LinkState.notPaired => (
-        Icons.qr_code_scanner,
-        null,
-        'Nessun PC abbinato',
-        'Sul PC apri Firmami, scegli "Abbina smartphone" e inquadra il QR code con il pulsante qui sotto'
-            '.${link.remoteEnabled ? '' : ' Telefono e PC devono essere sulla stessa Wi-Fi.'}',
-      ),
-      LinkState.connected => (
-        Icons.link,
-        Colors.green,
-        'Collegato a $pcName',
-        '${link.viaInternet ? 'Via internet. ' : ''}In attesa di richieste dal PC. Tieni aperta l\'app durante la firma.',
-      ),
-      LinkState.connecting => (Icons.sync, null, 'Collegamento a $pcName…', ''),
-      LinkState.disconnected => (
-        Icons.link_off,
-        theme.colorScheme.error,
-        '$pcName non raggiungibile',
-        link.remoteEnabled
-            ? 'Controlla che Firmami sia aperto sul PC e che PC e telefono siano collegati a internet.'
-            : 'Controlla che Firmami sia aperto sul PC e che i due dispositivi siano sulla stessa Wi-Fi.',
-      ),
-    };
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 8),
-              Expanded(child: Text(title, style: theme.textTheme.titleMedium)),
-            ]),
-            if (text.isNotEmpty) ...[const SizedBox(height: 8), Text(text)],
-            if (link.state == LinkState.disconnected && link.lastError != null) ...[
-              const SizedBox(height: 8),
-              Text(link.lastError!, style: theme.textTheme.bodySmall),
-            ],
-            const SizedBox(height: 12),
-            if (link.state == LinkState.notPaired)
-              FilledButton.icon(onPressed: _scan, icon: const Icon(Icons.qr_code_scanner), label: const Text('Abbina PC')),
-            if (link.state == LinkState.disconnected && link.suggestInternet && !link.internetEnabled) ...[
-              const Text(
-                'Se il telefono non è sulla stessa rete del PC, per esempio in 4G o su un\'altra Wi-Fi, '
-                'puoi collegarti via internet. Sul PC va attivata la stessa opzione.',
-              ),
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: () {
-                  link.setInternetEnabled(true);
-                  link.connect();
-                },
-                icon: const Icon(Icons.public),
-                label: const Text('Non sono sulla stessa rete'),
-              ),
-              const SizedBox(height: 8),
-            ],
-            if (link.state == LinkState.disconnected)
-              FilledButton.icon(onPressed: link.connect, icon: const Icon(Icons.refresh), label: const Text('Ricollega')),
-            if (link.remoteAvailable && link.state != LinkState.notPaired)
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Non sono sulla stessa rete'),
-                subtitle: const Text('Collegamento via internet quando il PC non è sulla rete locale'),
-                value: link.internetEnabled,
-                onChanged: (v) {
-                  link.setInternetEnabled(v);
-                  if (v && link.state == LinkState.disconnected) link.connect();
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-String _when(DateTime d) {
-  String two(int v) => v.toString().padLeft(2, '0');
-  return '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
 }
 
 /// Schermata del prototipo: legge il certificato dalla CIE e firma un'impronta di prova.

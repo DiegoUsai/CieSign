@@ -38,6 +38,21 @@ void main() {
     expect(f.reports.single.isIntact, isTrue);
   });
 
+  test('su un .p7m la firma si aggiunge alla busta (firma parallela)', () {
+    final content = Uint8List.fromList('offerta'.codeUnits);
+    final first = LocalSigner.prepare(LocalDocument('offerta.txt', content), SignFormat.cades, certDer, now: valid);
+    final p7m = first.finish(key.signSha256(first.digestToSign));
+    final doc = LocalDocument('offerta.txt.p7m', p7m);
+    expect(LocalSigner.isCosign(doc, SignFormat.cades), isTrue);
+    expect(LocalSigner.signedName(doc.name, SignFormat.cades, cosign: true), 'offerta.txt.p7m');
+    final second = LocalSigner.prepare(doc, SignFormat.cades, certDer, now: valid);
+    final out = second.finish(key.signSha256(second.digestToSign));
+    final f = CadesFile.open(out);
+    expect(f.content, content);
+    expect(f.reports, hasLength(2));
+    expect(f.reports.every((r) => r.isIntact), isTrue);
+  });
+
   test('rifiuta un certificato scaduto prima di far firmare la carta', () {
     final doc = LocalDocument('contratto.pdf', _res('semplice.pdf'));
     expect(

@@ -16,10 +16,10 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 SVG = (pathlib.Path(__file__).parent / "logo-firmami.svg").read_text(encoding="utf-8")
 
 
-def png(path: pathlib.Path, size: int, margin: float = 0.0) -> None:
+def png(path: pathlib.Path, size: int, margin: float = 0.0, svg: str = SVG) -> None:
     """Scrive il logo in PNG quadrato di lato ``size``; ``margin`` è la frazione di bordo trasparente."""
     inner = round(size * (1 - 2 * margin))
-    data = cairosvg.svg2png(bytestring=SVG.encode(), output_width=inner, output_height=inner)
+    data = cairosvg.svg2png(bytestring=svg.encode(), output_width=inner, output_height=inner)
     path.parent.mkdir(parents=True, exist_ok=True)
     if inner == size:
         path.write_bytes(data)
@@ -40,6 +40,14 @@ for folder, size in {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdp
 macos = ROOT / "desktop/macos/Runner/Assets.xcassets/AppIcon.appiconset"
 for size in (16, 32, 64, 128, 256, 512, 1024):
     png(macos / f"app_icon_{size}.png", size, margin=0.1)
+
+# iOS (app per telefono): quadrato pieno senza trasparenza, gli angoli li arrotonda il sistema.
+ios = ROOT / "companion/ios/Runner/Assets.xcassets/AppIcon.appiconset"
+square = SVG.replace('rx="28"', 'rx="0"', 1)
+for name in sorted(p.name for p in ios.glob("Icon-App-*.png")):
+    points, scale = name.removeprefix("Icon-App-").removesuffix(".png").split("@")
+    size = round(float(points.split("x")[0]) * int(scale.removesuffix("x")))
+    png(ios / name, size, svg=square)
 
 # Windows (app desktop): un solo .ico con tutte le dimensioni.
 with tempfile.TemporaryDirectory() as d:

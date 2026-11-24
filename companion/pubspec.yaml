@@ -42,6 +42,10 @@ dependencies:
     path: ../packages/ciesign_webrtc
   mobile_scanner: ^7.5.0
   path_provider: ^2.1.6
+  ciesign_docset:
+    path: ../packages/ciesign_docset
+  ciesign_cie:
+    path: ../packages/ciesign_cie
   ciesign_ades:
     path: ../packages/ciesign_ades
   firmami_brand:
@@ -49,6 +53,7 @@ dependencies:
   pdfrx: ^3.1.0
   file_picker: ^13.4.1
   share_plus: ^13.3.1
+  open_filex: ^5.0.0
 
 dev_dependencies:
   flutter_test:

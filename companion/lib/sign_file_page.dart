@@ -15,7 +15,7 @@ import 'pin_unlock.dart';
 /// Firma di un documento sul telefono, senza PC (UC11): scelta del file,
 /// formato, posizione della firma visibile, PIN e CIE.
 class SignFilePage extends StatefulWidget {
-  const SignFilePage({super.key, required this.bridge, required this.store, this.onCertificate, this.initial});
+  const SignFilePage({super.key, required this.bridge, required this.store, this.onCertificate, this.initial, this.onSigned});
 
   final CieBridge bridge;
   final SignedStore store;
@@ -23,8 +23,11 @@ class SignFilePage extends StatefulWidget {
   /// Riceve il certificato letto, che il telefono ricorda anche per le firme dal PC.
   final void Function(Uint8List)? onCertificate;
 
-  /// Documento già scelto, usato nei test.
+  /// Documento già scelto (dalla pagina del documento o nei test).
   final LocalDocument? initial;
+
+  /// Chiamata dopo il salvataggio del file firmato, per le marcature e i Recenti.
+  final Future<void> Function(File file, Uint8List bytes, String holder, SignFormat format)? onSigned;
 
   @override
   State<SignFilePage> createState() => _SignFilePageState();
@@ -91,31 +94,127 @@ class _SignFilePageState extends State<SignFilePage> {
     return true;
   }
 
+  /// Margine attorno al riquadro per cestino e maniglia, che sporgono dagli angoli.
+  static const _pad = 18.0;
+  static const _minW = 90.0, _minH = 32.0;
+
+  /// Sposta il riquadro di [dx], [dy] pixel dello schermo, restando dentro la pagina.
+  void _moveBox(rx.PdfPage page, double scale, Offset delta) {
+    final b = _box;
+    if (b == null) return;
+    setState(() {
+      _box = VisibleSignature(
+        pageIndex: b.pageIndex,
+        // Coordinate PDF: origine in basso a sinistra, quindi la y va al contrario.
+        x: (b.x + delta.dx / scale).clamp(0.0, page.width - b.width),
+        y: (b.y - delta.dy / scale).clamp(0.0, page.height - b.height),
+        width: b.width,
+        height: b.height,
+      );
+    });
+  }
+
+  /// Ridimensiona dall'angolo in basso a destra, tenendo fermo l'angolo in alto a sinistra.
+  void _resizeBox(rx.PdfPage page, double scale, Offset delta) {
+    final b = _box;
+    if (b == null) return;
+    final top = b.y + b.height;
+    final w = (b.width + delta.dx / scale).clamp(_minW, page.width - b.x);
+    final h = (b.height + delta.dy / scale).clamp(_minH, top);
+    setState(() {
+      _box = VisibleSignature(pageIndex: b.pageIndex, x: b.x, y: top - h, width: w, height: h);
+    });
+  }
+
+  void _removeBox() => setState(() {
+    _box = null;
+    _hint = null;
+  });
+
   List<Widget> _overlays(BuildContext context, Rect pageRect, rx.PdfPage page) {
     final box = _box;
     if (!_placing || box == null || box.pageIndex != page.pageNumber - 1) return const [];
     final scale = pageRect.width / page.width;
     return [
       Positioned(
-        left: box.x * scale,
-        top: (page.height - box.y - box.height) * scale,
-        width: box.width * scale,
-        height: box.height * scale,
-        child: IgnorePointer(
-          child: Container(
-            decoration: BoxDecoration(
-              color: const Color(0x220066CC),
-              border: Border.all(color: const Color(0xFF0066CC), width: 1.5),
-            ),
-            padding: EdgeInsets.all(3 * scale),
-            child: FittedBox(
-              alignment: Alignment.topLeft,
-              child: Text(
-                'Firmato con CIE da\nNome Cognome\nil gg/mm/aaaa alle hh:mm\nFirma elettronica avanzata',
-                style: TextStyle(fontSize: 10, color: Colors.grey.shade900, height: 1.25),
+        left: box.x * scale - _pad,
+        top: (page.height - box.y - box.height) * scale - _pad,
+        width: box.width * scale + 2 * _pad,
+        height: box.height * scale + 2 * _pad,
+        child: Stack(
+          children: [
+            // Il riquadro si trascina con il dito.
+            Positioned.fill(
+              left: _pad,
+              top: _pad,
+              right: _pad,
+              bottom: _pad,
+              child: GestureDetector(
+                key: const Key('riquadro-firma'),
+                behavior: HitTestBehavior.opaque,
+                onPanUpdate: (d) => _moveBox(page, scale, d.delta),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0x220066CC),
+                    border: Border.all(color: const Color(0xFF0066CC), width: 1.5),
+                  ),
+                  padding: EdgeInsets.all(3 * scale),
+                  child: FittedBox(
+                    alignment: Alignment.topLeft,
+                    child: Text(
+                      'Firmato con CIE da\nNome Cognome\nil gg/mm/aaaa alle hh:mm\nFirma elettronica avanzata',
+                      style: TextStyle(fontSize: 10, color: Colors.grey.shade900, height: 1.25),
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
+            // Cestino nell'angolo in alto a destra (proposta A scelta da Diego).
+            Positioned(
+              right: 0,
+              top: 0,
+              child: Semantics(
+                button: true,
+                label: 'Elimina il riquadro della firma',
+                child: GestureDetector(
+                  key: const Key('cestino-firma'),
+                  onTap: _removeBox,
+                  child: Container(
+                    width: 2 * _pad,
+                    height: 2 * _pad,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFD93025),
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Color(0x55000000), blurRadius: 3, offset: Offset(0, 1))],
+                    ),
+                    child: const Icon(Icons.delete_outline, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+            ),
+            // Maniglia in basso a destra per ridimensionare.
+            Positioned(
+              right: _pad - 11,
+              bottom: _pad - 11,
+              child: GestureDetector(
+                key: const Key('maniglia-firma'),
+                behavior: HitTestBehavior.opaque,
+                onPanUpdate: (d) => _resizeBox(page, scale, d.delta),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Container(
+                    width: 18,
+                    height: 18,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0066CC),
+                      border: Border.all(color: Colors.white, width: 2),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     ];
@@ -141,7 +240,11 @@ class _SignFilePageState extends State<SignFilePage> {
     );
     if (out == null || !mounted) return;
     widget.onCertificate?.call(out.certificate);
-    final file = await widget.store.save(LocalSigner.signedName(doc.name, _format), out.bytes);
+    final file = await widget.store.save(
+      LocalSigner.signedName(doc.name, _format, cosign: LocalSigner.isCosign(doc, _format)),
+      out.bytes,
+    );
+    await widget.onSigned?.call(file, out.bytes, out.holder, _format);
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute(builder: (_) => SignedPage(file: file, holder: out.holder)),
@@ -154,7 +257,7 @@ class _SignFilePageState extends State<SignFilePage> {
     final doc = _doc;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Firma un documento'),
+        title: Text(doc?.name ?? 'Apri un documento', maxLines: 1, overflow: TextOverflow.ellipsis),
         actions: [
           if (doc != null) IconButton(tooltip: 'Scegli un altro file', onPressed: _pick, icon: const Icon(Icons.folder_open)),
         ],
@@ -195,7 +298,6 @@ class _SignFilePageState extends State<SignFilePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(doc.name, style: theme.textTheme.titleMedium, maxLines: 2, overflow: TextOverflow.ellipsis),
               Text(
                 [
                   _size(doc.bytes.length),
@@ -222,7 +324,7 @@ class _SignFilePageState extends State<SignFilePage> {
                         ? 'La firma non comparirà nella pagina.'
                         : _box == null
                             ? 'Tocca la pagina dove vuoi il riquadro.'
-                            : 'Pagina ${_box!.pageIndex + 1}. Tocca altrove per spostarlo.',
+                            : 'Pagina ${_box!.pageIndex + 1}. Trascinalo per spostarlo, usa la maniglia per ridimensionarlo o il cestino per toglierlo.',
                   ),
                   value: _visible,
                   onChanged: (v) => setState(() => _visible = v),
@@ -250,11 +352,13 @@ class _SignFilePageState extends State<SignFilePage> {
 
   Widget _preview(LocalDocument doc) {
     if (!doc.isPdf || doc.isP7m) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(24),
+          padding: const EdgeInsets.all(24),
           child: Text(
-            'Anteprima non disponibile per questo tipo di file: verrà firmato in CAdES e salvato come .p7m.',
+            LocalSigner.isCosign(doc, _format)
+                ? 'La tua firma si aggiunge a quelle della busta (firma parallela CAdES): il file resta un unico .p7m.'
+                : 'Anteprima non disponibile per questo tipo di file: verrà firmato in CAdES e salvato come .p7m.',
             textAlign: TextAlign.center,
           ),
         ),

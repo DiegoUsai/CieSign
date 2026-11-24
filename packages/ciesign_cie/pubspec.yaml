@@ -1,0 +1,15 @@
+name: ciesign_cie
+description: Dialogo con la CIE 3.0 (IAS ECC) in Dart puro, condiviso tra Android e iOS. Il codice nativo fornisce solo lo scambio dei comandi NFC.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  crypto: ^3.0.8
+  pointycastle: ^4.0.0
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^6.0.0

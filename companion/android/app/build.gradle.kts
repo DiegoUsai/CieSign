@@ -30,12 +30,6 @@ android {
         versionName = flutter.versionName
     }
 
-    // Il modulo CIE è Kotlin puro e vive in cie-core, dove ha i propri test sulla JVM.
-    sourceSets {
-        getByName("main") {
-            java.srcDir("../../../cie-core/src/main/kotlin")
-        }
-    }
 
     buildTypes {
         release {

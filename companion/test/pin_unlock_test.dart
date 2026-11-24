@@ -1,4 +1,5 @@
 import 'package:cie_sign_companion/cie_bridge.dart';
+import 'package:ciesign_cie/testing.dart';
 import 'package:cie_sign_companion/main.dart';
 import 'package:cie_sign_companion/pin_unlock.dart';
 import 'package:flutter/services.dart';
@@ -41,31 +42,19 @@ class _HarnessState extends State<_Harness> with PinUnlockMixin {
   );
 }
 
-Map<String, Object?> _result() => {
-  'certificate': Uint8List(1),
-  'subject': 'CN=Prova',
-  'issuer': 'CN=CA',
-  'serial': '01',
-  'notBefore': '01/01/2026 00:00',
-  'notAfter': '01/01/2036 00:00',
-  'certSha256': Uint8List(32),
-  'digest': null,
-  'signature': null,
-  'signatureValid': null,
-  'durationMs': 10,
-};
-
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('ciesign/cie');
   late List<MethodCall> calls;
   late Map<String, Object?> status;
-  Object? Function(MethodCall)? onStart;
+  late SimulatedCie card;
+  Object? Function()? onUnlock;
 
   setUp(() {
     calls = [];
     status = {'availability': 'ready', 'enabled': true, 'saved': false, 'deviceCredential': true};
-    onStart = null;
+    onUnlock = null;
+    card = SimulatedCie();
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
       switch (call.method) {
@@ -74,8 +63,15 @@ void main() {
         case 'vaultSave':
           status = {...status, 'saved': true};
           return status;
-        case 'start':
-          return onStart?.call(call) ?? _result();
+        case 'vaultUnlock':
+          return onUnlock?.call() ?? '12345678';
+        case 'vaultForget':
+          status = {...status, 'saved': false};
+          return status;
+        case 'nfcBegin':
+          return <String, Object?>{};
+        case 'transceive':
+          return card.transceive(call.arguments as Uint8List);
       }
       return null;
     });
@@ -95,15 +91,15 @@ void main() {
   });
 
   testWidgets('con la funzione attiva il PIN digitato si salva dopo la firma riuscita', (tester) async {
-    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge())));
+    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge(caPrivateExponentForTest: card.caPrivateExponent))));
     await tester.pumpAndSettle();
     expect(find.textContaining('ricordare il PIN'), findsOneWidget);
     await tester.enterText(find.byType(TextField), '12345678');
     await tester.pump();
     await tester.tap(find.text('Firma'));
     await tester.pumpAndSettle();
-    final start = calls.firstWhere((c) => c.method == 'start');
-    expect((start.arguments as Map)['pin'], '12345678');
+    expect(calls.where((c) => c.method == 'nfcBegin'), hasLength(1));
+    expect(calls.where((c) => c.method == 'vaultUnlock'), isEmpty);
     final save = calls.firstWhere((c) => c.method == 'vaultSave');
     expect((save.arguments as Map)['pin'], '12345678');
     expect(find.textContaining('PIN salvato: alle prossime'), findsOneWidget);
@@ -111,7 +107,7 @@ void main() {
 
   testWidgets('con la funzione spenta il PIN non si salva', (tester) async {
     status = {'availability': 'ready', 'enabled': false, 'saved': false};
-    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge())));
+    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge(caPrivateExponentForTest: card.caPrivateExponent))));
     await tester.pumpAndSettle();
     expect(find.textContaining('ricordare il PIN'), findsNothing);
     await tester.enterText(find.byType(TextField), '12345678');
@@ -121,23 +117,22 @@ void main() {
     expect(calls.where((c) => c.method == 'vaultSave'), isEmpty);
   });
 
-  testWidgets('con il PIN salvato si firma senza digitarlo e il PIN non passa da Flutter', (tester) async {
+  testWidgets('con il PIN salvato si firma senza digitarlo', (tester) async {
     status = {...status, 'saved': true};
-    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge())));
+    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge(caPrivateExponentForTest: card.caPrivateExponent))));
     await tester.pumpAndSettle();
     expect(find.byType(TextField), findsNothing);
     expect(find.textContaining('PIN salvato sul telefono'), findsOneWidget);
     await tester.tap(find.text('Firma'));
     await tester.pumpAndSettle();
-    final args = calls.firstWhere((c) => c.method == 'start').arguments as Map;
-    expect(args['savedPin'], isTrue);
-    expect(args.containsKey('pin'), isFalse);
+    expect(calls.where((c) => c.method == 'vaultUnlock'), hasLength(1));
+    expect(find.text('ok'), findsOneWidget);
     expect(calls.where((c) => c.method == 'vaultSave'), isEmpty);
   });
 
   testWidgets('si può sempre tornare al PIN digitato', (tester) async {
     status = {...status, 'saved': true};
-    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge())));
+    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge(caPrivateExponentForTest: card.caPrivateExponent))));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Inserisci il PIN a mano'));
     await tester.pump();
@@ -148,8 +143,8 @@ void main() {
 
   testWidgets('un PIN salvato rifiutato dalla carta fa tornare al PIN digitato', (tester) async {
     status = {...status, 'saved': true};
-    onStart = (_) => throw PlatformException(code: 'WRONG_PIN', message: 'PIN errato', details: 2);
-    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge())));
+    onUnlock = () => '00000000';
+    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge(caPrivateExponentForTest: card.caPrivateExponent))));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Firma'));
     await tester.pumpAndSettle();
@@ -157,12 +152,13 @@ void main() {
     expect(find.textContaining('Tentativi rimasti: 2'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
     expect(find.text('Usa il PIN salvato'), findsNothing);
+    expect(calls.where((c) => c.method == 'vaultForget'), hasLength(1));
   });
 
   testWidgets('se cambiano le impronte il PIN salvato è cancellato', (tester) async {
     status = {...status, 'saved': true};
-    onStart = (_) => throw PlatformException(code: 'VAULT_INVALIDATED', message: 'cambiate');
-    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge())));
+    onUnlock = () => throw PlatformException(code: 'VAULT_INVALIDATED', message: 'cambiate');
+    await tester.pumpWidget(CieSignCompanionApp(home: _Harness(CieBridge(caPrivateExponentForTest: card.caPrivateExponent))));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Firma'));
     await tester.pumpAndSettle();
